@@ -1,0 +1,2 @@
+# 在文件末尾直接加一行
+dataset.image_shape: [184, 184]

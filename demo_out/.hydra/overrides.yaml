@@ -1,0 +1,5 @@
+- mode=test
+- +experiment=re10k
+- checkpointing.load=re10k.ckpt
+- dataset/view_sampler=evaluation
+- dataset.view_sampler.index_path=datasets/re10k_mini/000000000.json

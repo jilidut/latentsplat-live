@@ -1,0 +1,23 @@
+# @package _global_
+defaults:
+  - /base
+  - /data: re10k
+  - /model: default
+  - override /data_loader: re10k
+
+experiment: re10k
+
+data_loader:
+  train:
+    batch_size: 1
+    num_workers: 15
+  val:
+    batch_size: 1
+    num_workers: 15
+
+# 强制离线
+wandb:
+  activated: true
+  project: latent-splat
+  name: re10k
+  mode: offline          # 关键一行

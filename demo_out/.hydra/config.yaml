@@ -1,0 +1,208 @@
+dataset:
+  view_sampler:
+    name: evaluation
+    index_path: datasets/re10k_mini/000000000.json
+    num_context_views: 2
+  name: re10k
+  roots:
+  - datasets/re10k
+  make_baseline_1: true
+  augment: true
+  image_shape:
+  - 256
+  - 256
+  background_color:
+  - 0.0
+  - 0.0
+  - 0.0
+  cameras_are_circular: false
+  baseline_epsilon: 0.001
+  max_fov: 100.0
+  overfit_to_scene: null
+model:
+  autoencoder:
+    name: kl
+    model: kl_f8
+    down_block_types:
+    - DownEncoderBlock2D
+    - DownEncoderBlock2D
+    - DownEncoderBlock2D
+    - DownEncoderBlock2D
+    up_block_types:
+    - UpDecoderBlock2D
+    - UpDecoderBlock2D
+    - UpDecoderBlock2D
+    - UpDecoderBlock2D
+    block_out_channels:
+    - 128
+    - 256
+    - 512
+    - 512
+    layers_per_block: 2
+    latent_channels: 4
+    skip_connections: true
+    skip_extra: true
+    skip_zero: true
+  encoder:
+    backbone:
+      name: dino
+      model: dino_vitb8
+    name: epipolar
+    opacity_mapping:
+      initial: 0.0
+      final: 0.0
+      warm_up: 1
+    num_monocular_samples: 32
+    num_surfaces: 1
+    predict_opacity: false
+    near_disparity: 3.0
+    gaussians_per_pixel: 3
+    gaussian_adapter:
+      gaussian_scale_min: 0.5
+      gaussian_scale_max: 15.0
+      color_sh_degree: 4
+      feature_sh_degree: 2
+    d_backbone: 512
+    d_feature: 128
+    epipolar_transformer:
+      self_attention:
+        patch_size: 4
+        num_octaves: 10
+        num_layers: 2
+        num_heads: 4
+        d_token: 128
+        d_dot: 128
+        d_mlp: 256
+      num_octaves: 10
+      num_layers: 2
+      num_heads: 4
+      num_samples: 32
+      d_dot: 128
+      d_mlp: 256
+      downscale: 4
+    visualizer:
+      num_samples: 8
+      min_resolution: 256
+      export_ply: false
+      vis_epipolar_samples: false
+      vis_epipolar_color_samples: false
+      vis_gaussians: false
+      vis_overlaps: false
+      vis_depth: false
+    apply_bounds_shim: true
+    use_epipolar_transformer: true
+    use_transmittance: false
+  decoder:
+    name: splatting_cuda
+  discriminator:
+    name: patch_gan
+    model: kl_f8
+    base_dim: 64
+    max_dim_mult: 8
+    n_layers: 3
+    downscale_factor: 2
+    kernel_size: 4
+    padding: 1
+    leaky_relu_neg_slope: 0.2
+  encode_latents: false
+  supersampling_factor: 8
+  variational: gaussians
+freeze:
+  autoencoder: false
+  encoder: false
+  decoder: false
+  discriminator: false
+loss:
+  gaussian: null
+  context: null
+  target:
+    autoencoder: null
+    render:
+      latent: null
+      image:
+        nll:
+        - name: mse
+          weight: 10
+        - name: lpips
+          weight: 0.5
+          apply_after_step: 50000
+    combined:
+      nll:
+      - name: l1
+        apply_after_step: 100000
+      - name: lpips
+        apply_after_step: 100000
+      generator:
+        weight: 0.5
+        apply_after_step: 125000
+      discriminator:
+        loss: hinge
+        apply_after_step: 125000
+wandb:
+  project: latentsplat
+  entity: placeholder
+  name: re10k
+  mode: online
+  activated: true
+  tags:
+  - co3d
+  - 256x256
+mode: test
+data_loader:
+  train:
+    num_workers: 16
+    persistent_workers: true
+    batch_size: 2
+    seed: 1234
+  test:
+    num_workers: 4
+    persistent_workers: false
+    batch_size: 1
+    seed: 2345
+  val:
+    num_workers: 1
+    persistent_workers: true
+    batch_size: 1
+    seed: 3456
+optimizer:
+  generator:
+    name: Adam
+    autoencoder_lr: 9.0e-06
+    scale_autoencoder_lr: true
+    lr: 0.00015
+    scale_lr: false
+    autoencoder_kwargs:
+      betas:
+      - 0.5
+      - 0.9
+    scheduler:
+      name: LinearLR
+      kwargs:
+        start_factor: 0.0005
+        total_iters: 2000
+    gradient_clip_val: 0.5
+  discriminator:
+    name: Adam
+    lr: 9.0e-06
+    scale_lr: true
+    kwargs:
+      betas:
+      - 0.5
+      - 0.9
+checkpointing:
+  load: re10k.ckpt
+  resume: false
+  every_n_train_steps: 2500
+  save_top_k: -1
+train:
+  depth_mode: null
+  extended_visualization: false
+  step_offset: 0
+  video_interpolation: false
+  video_wobble: false
+test:
+  output_path: outputs/test
+seed: 111123
+trainer:
+  max_steps: 200001
+  val_check_interval: 250

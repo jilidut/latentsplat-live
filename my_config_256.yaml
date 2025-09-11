@@ -1,0 +1,246 @@
+dataset:
+  view_sampler:
+    name: bounded
+    num_target_views: 4
+    num_context_views: 2
+    min_distance_between_context_views: 45
+    max_distance_between_context_views: 45
+    min_distance_to_context_views: 0
+    context_gap_warm_up_steps: 50000
+    target_gap_warm_up_steps: 50000
+    initial_min_distance_between_context_views: 25
+    initial_max_distance_between_context_views: 25
+    max_distance_to_context_views: 45
+    initial_max_distance_to_context_views: 0
+  name: re10k
+  roots:
+  - /home/jilidut/download/file/latentsplat/latentsplat-main/datasets/re10k
+  skip_missing: false
+  strict: false
+  allow_empty: false
+  make_baseline_1: true
+  augment: true
+  image_shape:
+  - 180
+  - 180
+  background_color:
+  - 0.0
+  - 0.0
+  - 0.0
+  cameras_are_circular: false
+  baseline_epsilon: 0.001
+  max_fov: 100.0
+  trainer:
+    precision: 16-mixed
+    accumulate_grad_batches: 4
+    check_val_every_n_epoch: 5
+  data_loader:
+    train:
+      num_workers: 8
+      pin_memory: true
+  overfit_to_scene: null
+model:
+  autoencoder:
+    name: kl
+    model: kl_f8
+    down_block_types:
+    - DownEncoderBlock2D
+    - DownEncoderBlock2D
+    - DownEncoderBlock2D
+    - DownEncoderBlock2D
+    up_block_types:
+    - UpDecoderBlock2D
+    - UpDecoderBlock2D
+    - UpDecoderBlock2D
+    - UpDecoderBlock2D
+    block_out_channels:
+    - 128
+    - 256
+    - 512
+    - 512
+    layers_per_block: 2
+    latent_channels: 4
+    skip_connections: false
+  encoder:
+    backbone:
+      name: dino
+      model: dino_vitb8
+    name: epipolar
+    opacity_mapping:
+      initial: 0.0
+      final: 0.0
+      warm_up: 1
+    num_monocular_samples: 32
+    num_surfaces: 1
+    predict_opacity: false
+    near_disparity: 3.0
+    gaussians_per_pixel: 3
+    gaussian_adapter:
+      gaussian_scale_min: 0.5
+      gaussian_scale_max: 15.0
+      color_sh_degree: 4
+      feature_sh_degree: 2
+    d_backbone: 512
+    d_feature: 128
+    epipolar_transformer:
+      self_attention:
+        patch_size: 4
+        num_octaves: 10
+        num_layers: 2
+        num_heads: 4
+        d_token: 128
+        d_dot: 128
+        d_mlp: 256
+      num_octaves: 10
+      num_layers: 2
+      num_heads: 4
+      num_samples: 484
+      d_dot: 128
+      d_mlp: 256
+      downscale: 4
+    visualizer:
+      num_samples: 484
+      min_resolution: 256
+      export_ply: false
+      vis_epipolar_samples: false
+      vis_epipolar_color_samples: false
+      vis_gaussians: false
+      vis_overlaps: false
+      vis_depth: false
+    apply_bounds_shim: true
+    use_epipolar_transformer: true
+    use_transmittance: false
+  decoder:
+    name: splatting_cuda
+    render_image: true
+    render_image_during_training: true
+  encode_latents: false
+  supersampling_factor: 1
+  variational: none
+experiment:
+  trainer:
+    precision: 16
+    amp_backend: native
+    accumulate_grad_batches: 1
+    max_steps: 6000
+    val_check_interval: 2000
+    log_every_n_steps: 10
+  model:
+    encoder:
+      epipolar:
+        num_samples: 196
+        epipolar_transformer:
+          num_layers: 1
+          num_heads: 4
+        gaussians_per_pixel: 1
+  loss:
+    gaussian:
+      nll:
+      - name: l1
+        weight: 1.0
+        apply_after_step: 0
+    target:
+      render:
+        image:
+          nll:
+          - name: l1
+            weight: 1.0
+            apply_after_step: 0
+datamodule:
+  batch_size: 4
+  num_workers: 8
+  pin_memory: true
+  base_resolution: 128
+  resolution_anneal: false
+freeze:
+  autoencoder: false
+  encoder: false
+  decoder: false
+  discriminator: false
+wandb:
+  project: latentsplat
+  entity: placeholder
+  name: placeholder
+  mode: online
+  activated: true
+mode: train
+data_loader:
+  train:
+    num_workers: 16
+    persistent_workers: true
+    batch_size: 2
+    seed: 1234
+  test:
+    num_workers: 4
+    persistent_workers: false
+    batch_size: 1
+    seed: 2345
+  val:
+    num_workers: 4
+    persistent_workers: true
+    batch_size: 1
+    seed: 3456
+optimizer:
+  generator:
+    name: Adam
+    autoencoder_lr: 9.0e-06
+    scale_autoencoder_lr: true
+    lr: 0.00015
+    scale_lr: false
+    autoencoder_kwargs:
+      betas:
+      - 0.5
+      - 0.9
+    scheduler:
+      name: LinearLR
+      kwargs:
+        start_factor: 0.0005
+        total_iters: 2000
+    gradient_clip_val: 0.5
+  discriminator:
+    name: Adam
+    lr: 9.0e-06
+    scale_lr: true
+    kwargs:
+      betas:
+      - 0.5
+      - 0.9
+checkpointing:
+  load: outputs/lightning_logs/version_1/checkpoints/last.ckpt
+  resume: true
+  every_n_train_steps: 2500
+  save_top_k: -1
+train:
+  depth_mode: null
+  extended_visualization: false
+  step_offset: 0
+  video_interpolation: false
+  video_wobble: false
+test:
+  output_path: outputs/test
+seed: 111123
+trainer:
+  max_steps: 200001
+  val_check_interval: 250
+  log_every_n_steps: 10
+  logger:
+    _target_: pytorch_lightning.loggers.TensorBoardLogger
+    save_dir: outputs/tensorboard
+loss:
+  gaussian:
+    nll:
+    - name: l1
+      weight: 1.0
+      apply_after_step: 0
+  target:
+    render:
+      image:
+        nll:
+        - name: l1
+          weight: 1.0
+          apply_after_step: 0
+callbacks:
+- src.callbacks.generate_gif.GenerateGif:
+    ckpt_path: last
+    output_dir: outputs/render
+    fps: 12

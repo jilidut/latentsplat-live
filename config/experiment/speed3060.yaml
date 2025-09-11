@@ -1,0 +1,48 @@
+# config/experiment/speed3060.yaml
+
+defaults:
+  - _self_
+  
+  
+trainer:
+  precision: 16
+  amp_backend: native
+  accumulate_grad_batches: 1
+  max_steps: 6000
+  val_check_interval: 2000
+  log_every_n_steps: 10
+
+
+# datamodule:
+#   batch_size: 4
+#   num_workers: 8
+#   pin_memory: true
+#   base_resolution: 128
+#   resolution_anneal: false
+
+model:
+  encoder:
+    epipolar:
+      num_samples: 196
+      epipolar_transformer:
+        num_layers: 1
+        num_heads: 4
+      gaussians_per_pixel: 1
+
+# dataset.image_shape: [184, 184]
+
+loss:
+  gaussian:
+    nll:
+      - name: l1
+        weight: 1.0
+        apply_after_step: 0
+  target:
+    render:
+      image:          # ← 必须显式声明 image
+        nll:
+          - name: l1
+            weight: 1.0
+            apply_after_step: 0
+
+dataset.image_shape: [184, 184]

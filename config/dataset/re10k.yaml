@@ -1,0 +1,26 @@
+defaults:
+  - view_sampler: bounded
+
+name: re10k
+roots: ["/home/jilidut/download/file/latentsplat/latentsplat-main/datasets/re10k"]
+skip_missing: false
+strict: false
+allow_empty: false
+make_baseline_1: true
+augment: true
+image_shape: [180,180]
+background_color: [0.0, 0.0, 0.0]
+cameras_are_circular: false
+baseline_epsilon: 1.0e-3
+max_fov: 100.0
+
+# 3060 提速设置
+trainer:
+  precision: 16-mixed
+  accumulate_grad_batches: 4
+  check_val_every_n_epoch: 5
+
+data_loader:
+  train:
+    num_workers: 8
+    pin_memory: true
