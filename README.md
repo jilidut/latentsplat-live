@@ -108,3 +108,4 @@ We've included the scripts that generate tables and figures in the paper. Note t
 ## Acknowledgements
 
 This project was partially funded by the Saarland/Intel Joint Program on the Future of Graphics and Media. We also thank David Charatan and co-authors for the great pixelSplat codebase, on which our implementation is based on.
+
