@@ -57,7 +57,6 @@ dataset:
   overfit_to_scene: null
 
 data_loader:
-  # Avoid having to spin up new processes to print out visualizations.
   train:
     num_workers: 16
     persistent_workers: true
@@ -77,7 +76,7 @@ data_loader:
 optimizer:
   generator:
     name: Adam
-    autoencoder_lr: 9.0e-6 # orig 4.5e-6 but doubled because of 2 context views
+    autoencoder_lr: 9.0e-6 
     scale_autoencoder_lr: true
     lr: 1.5e-4
     scale_lr: false
@@ -91,7 +90,7 @@ optimizer:
     gradient_clip_val: 0.5
   discriminator:
     name: Adam
-    lr: 9.0e-6 # orig 4.5e-6 but doubled because of 2 context views
+    lr: 9.0e-6 
     scale_lr: true
     kwargs:
       betas: [0.5, 0.9]
@@ -113,52 +112,6 @@ test:
   output_path: outputs/test
 
 seed: 111123
-
-
-# datamodule:
-#   batch_size: 4
-#   num_workers: 8
-#   pin_memory: true
-#   base_resolution: 128
-#   resolution_anneal: false
-
-# datamodule:
-#   batch_size: 12         
-#   num_workers: 14        
-#   pin_memory: true      
-#   base_resolution: 128
-#   resolution_anneal: false
-
-# trainer:
-#   # max_steps: 200_001
-#   accelerator: gpu
-#   devices: 1
-#   precision: 16
-#   max_steps: 500
-#   val_check_interval: 200        
-#   log_every_n_steps: 50         
-#   strategy: ddp_graph            
-#   accumulate_grad_batches: 8
-#   logger:
-#     _target_: pytorch_lightning.loggers.TensorBoardLogger
-#     save_dir: outputs/tensorboard
-
-# datamodule:
-#   batch_size: 42
-#   num_workers: 6
-#   pin_memory: true
-#   base_resolution: 128
-#   resolution_anneal: true
-
-# trainer:
-#   accelerator: gpu
-#   devices: 1
-#   precision: bf16-mixed
-#   max_steps: 300
-#   val_check_interval: 5000
-#   log_every_n_steps: 200
-#   strategy: auto
-#   accumulate_grad_batches: 1
 
 datamodule:
   batch_size: 20          # 12 GB 安全值，256² 也不会爆
