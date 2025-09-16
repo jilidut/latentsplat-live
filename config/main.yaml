@@ -9,22 +9,6 @@ defaults:
   - experiment: speed3060 
   - _self_
 
-# datamodule:
-#   batch_size: 4
-#   num_workers: 8
-#   pin_memory: true
-#   base_resolution: 128
-#   resolution_anneal: false
-
-datamodule:
-  batch_size: 2          # 先保平安，OOM 后再往上加
-  num_workers: 4         # 之前 8→4
-  pin_memory: false      # 之前 true→false
-  base_resolution: 128
-  resolution_anneal: false
-
-
-
 
 model:
   supersampling_factor: 1
@@ -130,18 +114,77 @@ test:
 
 seed: 111123
 
+
+# datamodule:
+#   batch_size: 4
+#   num_workers: 8
+#   pin_memory: true
+#   base_resolution: 128
+#   resolution_anneal: false
+
+# datamodule:
+#   batch_size: 12         
+#   num_workers: 14        
+#   pin_memory: true      
+#   base_resolution: 128
+#   resolution_anneal: false
+
+# trainer:
+#   # max_steps: 200_001
+#   accelerator: gpu
+#   devices: 1
+#   precision: 16
+#   max_steps: 500
+#   val_check_interval: 200        
+#   log_every_n_steps: 50         
+#   strategy: ddp_graph            
+#   accumulate_grad_batches: 8
+#   logger:
+#     _target_: pytorch_lightning.loggers.TensorBoardLogger
+#     save_dir: outputs/tensorboard
+
+# datamodule:
+#   batch_size: 42
+#   num_workers: 6
+#   pin_memory: true
+#   base_resolution: 128
+#   resolution_anneal: true
+
+# trainer:
+#   accelerator: gpu
+#   devices: 1
+#   precision: bf16-mixed
+#   max_steps: 300
+#   val_check_interval: 5000
+#   log_every_n_steps: 200
+#   strategy: auto
+#   accumulate_grad_batches: 1
+
+datamodule:
+  batch_size: 20          # 12 GB 安全值，256² 也不会爆
+  num_workers: 4          # 单卡 4 核足够
+  pin_memory: true
+  base_resolution: 128
+  resolution_anneal: true
+
 trainer:
-  # max_steps: 200_001
-  accelerator: cpu
+  accelerator: gpu
   devices: 1
-  precision: 32          # CPU 不支持 16-mixed
-  max_steps: 100
-  val_check_interval: 50
-  log_every_n_steps: 10
-  accumulate_grad_batches: 4
+  # precision: bf16-mixed   # 再省 15 % 显存
+  precision: 16
+  max_steps: 200
+  val_check_interval: 5000
+  log_every_n_steps: 200
+  strategy: auto
+  # accumulate_grad_batches: 1
+  gradient_clip_val: null   # 手动优化，禁用裁剪
+
   logger:
     _target_: pytorch_lightning.loggers.TensorBoardLogger
     save_dir: outputs/tensorboard
+
+generate_gif: false
+gif_interval: 25000  # 每 2.5 万步写一次，全程只写 8 张
 
 
 loss:
@@ -157,9 +200,3 @@ loss:
           - name: l1
             weight: 1.0
             apply_after_step: 0
-
-# callbacks:
-#   - src.callbacks.generate_gif.GenerateGif:
-#       ckpt_path: last
-#       output_dir: outputs/render
-#       fps: 12

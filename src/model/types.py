@@ -6,11 +6,20 @@ from jaxtyping import Float
 from torch import Tensor
 
 
+# @dataclass
+# class Gaussians:
+#     means: Float[Tensor, "batch gaussian dim"]
+#     covariances: Float[Tensor, "batch gaussian dim dim"]
+#     opacities: Float[Tensor, "batch gaussian"]
+#     color_harmonics: Float[Tensor, "batch gaussian 3 d_color_sh"] | None = None
+#     feature_harmonics: Float[Tensor, "batch gaussian channels d_feature_sh"] | None = None
+
 @dataclass
 class Gaussians:
     means: Float[Tensor, "batch gaussian dim"]
     covariances: Float[Tensor, "batch gaussian dim dim"]
     opacities: Float[Tensor, "batch gaussian"]
+    scales: Float[Tensor, "batch gaussian dim"]  # ✅ 加这一行
     color_harmonics: Float[Tensor, "batch gaussian 3 d_color_sh"] | None = None
     feature_harmonics: Float[Tensor, "batch gaussian channels d_feature_sh"] | None = None
 
@@ -19,8 +28,17 @@ class Gaussians:
 class VariationalGaussians(Gaussians):
     feature_harmonics: DiagonalGaussianDistribution | None = None
 
+    # def _to_gaussians(self, feature_harmonics: Float[Tensor, "batch gaussian channels d_feature_sh"]) -> Gaussians:
+    #     return Gaussians(self.means, self.covariances, self.opacities, self.color_harmonics, feature_harmonics)
     def _to_gaussians(self, feature_harmonics: Float[Tensor, "batch gaussian channels d_feature_sh"]) -> Gaussians:
-        return Gaussians(self.means, self.covariances, self.opacities, self.color_harmonics, feature_harmonics)
+        return Gaussians(
+            means=self.means,
+            covariances=self.covariances,
+            opacities=self.opacities,
+            scales=self.scales, 
+            color_harmonics=self.color_harmonics,
+            feature_harmonics=feature_harmonics,
+        )
 
     def flatten(self) -> Gaussians:
         return self._to_gaussians(self.feature_harmonics.params)

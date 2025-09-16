@@ -265,28 +265,51 @@ class EncoderEpipolar(Encoder[EncoderEpipolarCfg]):
             dim=-2
         )
 
-        if visualization_dump is not None:
-            visualization_dump["hb"] = hb
-            visualization_dump["wb"] = wb
+        # if visualization_dump is not None:
+        #     visualization_dump["hb"] = hb
+        #     visualization_dump["wb"] = wb
 
+        # return VariationalGaussians(
+        #     rearrange(
+        #         gaussians.means,
+        #         "b v r srf spp xyz -> b (v r srf spp) xyz",
+        #     ),
+        #     rearrange(
+        #         gaussians.covariances,
+        #         "b v r srf spp i j -> b (v r srf spp) i j",
+        #     ),
+        #     rearrange(
+        #         opacity_multiplier * gaussians.opacities,
+        #         "b v r srf spp -> b (v r srf spp)",
+        #     ),
+        #     rearrange(
+        #         gaussians.color_harmonics,
+        #         "b v r srf spp c d_c_sh -> b (v r srf spp) c d_c_sh",
+        #     ),
+        #     gaussian_features,
+        # )
         return VariationalGaussians(
-            rearrange(
+            means=rearrange(
                 gaussians.means,
                 "b v r srf spp xyz -> b (v r srf spp) xyz",
             ),
-            rearrange(
+            covariances=rearrange(
                 gaussians.covariances,
                 "b v r srf spp i j -> b (v r srf spp) i j",
             ),
-            rearrange(
+            opacities=rearrange(
                 opacity_multiplier * gaussians.opacities,
                 "b v r srf spp -> b (v r srf spp)",
             ),
-            rearrange(
+            scales=rearrange(
+                gaussians.scales,
+                "b v r srf spp xyz -> b (v r srf spp) xyz",
+            ),
+            color_harmonics=rearrange(
                 gaussians.color_harmonics,
                 "b v r srf spp c d_c_sh -> b (v r srf spp) c d_c_sh",
             ),
-            gaussian_features,
+            feature_harmonics=gaussian_features,  
         )
 
     def get_data_shim(self) -> DataShim:

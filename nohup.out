@@ -1,0 +1,140 @@
+[DEBUG] Hydra config loaded from: main
+[36mSaving outputs to /home/jilidut/download/file/latentsplat/latentsplat-main/outputs/2025-09-15/16-12-56.185455.[39m
+[16:12:56] >>> 即将构建 Trainer
+GPU available: True (cuda), used: True
+TPU available: False, using: 0 TPU cores
+IPU available: False, using: 0 IPUs
+HPU available: False, using: 0 HPUs
+Using cache found in /home/jilidut/.cache/torch/hub/facebookresearch_dino_main
+[EncoderEpipolar] cfg.num_surfaces = 1
+[EncoderEpipolar] num_surfaces=1, adapter.d_in=118, total=120
+[DEBUG] cfg.loss = LossCfg(gaussian=LossGroupCfg(nll=[LossL1Cfg(name='l1', weight=1.0, apply_after_step=0)], generator=None, discriminator=None), context=None, target=TargetLossCfg(autoencoder=None, render=TargetRenderLossCfg(latent=None, image=LossGroupCfg(nll=[LossL1Cfg(name='l1', weight=1.0, apply_after_step=0)], generator=None, discriminator=None)), combined=None))
+[DEBUG] cfg.loss.gaussian = LossGroupCfg(nll=[LossL1Cfg(name='l1', weight=1.0, apply_after_step=0)], generator=None, discriminator=None)
+[16:12:57] >>> 即将实例化 ModelWrapper
+[DEBUG] get_loss_group called: name=gaussian, group_cfg=LossGroupCfg(nll=[LossL1Cfg(name='l1', weight=1.0, apply_after_step=0)], generator=None, discriminator=None)
+[INIT] LossL1 initialized with apply_after_step=0
+[DEBUG] get_loss_group called: name=context, group_cfg=None
+[DEBUG] get_loss_group called: name=target/autoencoder, group_cfg=None
+[DEBUG] get_loss_group called: name=target/render/latent, group_cfg=None
+[DEBUG] get_loss_group called: name=target/render/image, group_cfg=LossGroupCfg(nll=[LossL1Cfg(name='l1', weight=1.0, apply_after_step=0)], generator=None, discriminator=None)
+[INIT] LossL1 initialized with apply_after_step=0
+[DEBUG] get_loss_group called: name=target/combined, group_cfg=None
+[16:12:57] >>> 即将构造 DataModule
+[DEBUG] val num_workers = 4
+[16:12:57] >>> 即将调用 trainer.fit(...)
+wandb: WARNING `resume` will be ignored since W&B syncing is set to `offline`. Starting a new run with run id rwqvxi3s.
+wandb: Tracking run with wandb version 0.12.17
+wandb: W&B syncing is set to `offline` in this directory.  
+wandb: Run `wandb online` or set WANDB_MODE=online to enable cloud syncing.
+LOCAL_RANK: 0 - CUDA_VISIBLE_DEVICES: [0]
+
+  | Name                        | Type                 | Params
+---------------------------------------------------------------------
+0 | autoencoder                 | AutoencoderKL        | 83.7 M
+1 | encoder                     | EncoderEpipolar      | 93.3 M
+2 | decoder                     | DecoderSplattingCUDA | 0     
+3 | gaussian_losses             | LossGroup            | 0     
+4 | context_losses              | LossGroup            | 0     
+5 | target_autoencoder_losses   | LossGroup            | 0     
+6 | target_render_latent_losses | LossGroup            | 0     
+7 | target_render_image_losses  | LossGroup            | 0     
+8 | target_combined_losses      | LossGroup            | 0     
+---------------------------------------------------------------------
+176 M     Trainable params
+0         Non-trainable params
+176 M     Total params
+707.881   Total estimated model params size (MB)
+[DEBUG] stage=val, data_stage=test
+[DEBUG] chunks=3, index=41
+[DEBUG] stage=train, data_stage=train
+[DEBUG] chunks=3, index=39
+[2025-09-15 16:13:00,442][py.warnings][WARNING] - /home/jilidut/download/file/latentsplat/latentsplat-main/venv310/lib/python3.10/site-packages/pytorch_lightning/utilities/data.py:121: Your `IterableDataset` has `__len__` defined. In combination with multi-process data loading (when num_workers > 1), `__len__` could be inaccurate if each worker is not configured independently to avoid having duplicate data.
+
+[2025-09-15 16:13:00,658][py.warnings][WARNING] - /home/jilidut/download/file/latentsplat/latentsplat-main/venv310/lib/python3.10/site-packages/pytorch_lightning/loops/fit_loop.py:298: The number of training batches (20) is smaller than the logging interval Trainer(log_every_n_steps=50). Set a lower value for log_every_n_steps if you want to see logs for the training epoch.
+
+[Encoder] forward received context type: <class 'dict'>
+[Encoder] context keys: dict_keys(['extrinsics', 'intrinsics', 'image', 'near', 'far', 'index'])
+DEBUG sampler: xy_sample torch.Size([2, 2, 1, 4, 484, 2]) overlaps_image torch.Size([2, 2, 1, 4]) valid cnt: 16
+Error executing job with overrides: ['mode=train', 'dataset.image_shape=[64,64]', 'trainer.precision=16', '+dataset.batch_size=1', '+datamodule.train_batch_size=1', 'datamodule.num_workers=0', '+dataset.num_workers=0', '+model.encoder.gradient_checkpointing=true', '+model.decoder.decode_view_ones=true', '+model.encoder.epipolar_transformer.downsample_factor=8']
+Traceback (most recent call last):
+  File "/home/jilidut/download/file/latentsplat/latentsplat-main/venv310/lib/python3.10/site-packages/einops/einops.py", line 523, in reduce
+    return _apply_recipe(
+  File "/home/jilidut/download/file/latentsplat/latentsplat-main/venv310/lib/python3.10/site-packages/einops/einops.py", line 234, in _apply_recipe
+    init_shapes, axes_reordering, reduced_axes, added_axes, final_shapes, n_axes_w_added = _reconstruct_from_shape(
+  File "/home/jilidut/download/file/latentsplat/latentsplat-main/venv310/lib/python3.10/site-packages/einops/einops.py", line 183, in _reconstruct_from_shape_uncached
+    raise EinopsError(f"Shape mismatch, {length} != {known_product}")
+einops.EinopsError: Shape mismatch, 16 != 4
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jilidut/download/file/latentsplat/latentsplat-main/src/main.py", line 199, in train
+    trainer.fit(model_wrapper, datamodule=data_module, ckpt_path=checkpoint_path if cfg.checkpointing.resume else None)
+  File "/home/jilidut/download/file/latentsplat/latentsplat-main/venv310/lib/python3.10/site-packages/pytorch_lightning/trainer/trainer.py", line 543, in fit
+    call._call_and_handle_interrupt(
+  File "/home/jilidut/download/file/latentsplat/latentsplat-main/venv310/lib/python3.10/site-packages/pytorch_lightning/trainer/call.py", line 44, in _call_and_handle_interrupt
+    return trainer_fn(*args, **kwargs)
+  File "/home/jilidut/download/file/latentsplat/latentsplat-main/venv310/lib/python3.10/site-packages/pytorch_lightning/trainer/trainer.py", line 579, in _fit_impl
+    self._run(model, ckpt_path=ckpt_path)
+  File "/home/jilidut/download/file/latentsplat/latentsplat-main/venv310/lib/python3.10/site-packages/pytorch_lightning/trainer/trainer.py", line 986, in _run
+    results = self._run_stage()
+  File "/home/jilidut/download/file/latentsplat/latentsplat-main/venv310/lib/python3.10/site-packages/pytorch_lightning/trainer/trainer.py", line 1032, in _run_stage
+    self.fit_loop.run()
+  File "/home/jilidut/download/file/latentsplat/latentsplat-main/venv310/lib/python3.10/site-packages/pytorch_lightning/loops/fit_loop.py", line 205, in run
+    self.advance()
+  File "/home/jilidut/download/file/latentsplat/latentsplat-main/venv310/lib/python3.10/site-packages/pytorch_lightning/loops/fit_loop.py", line 363, in advance
+    self.epoch_loop.run(self._data_fetcher)
+  File "/home/jilidut/download/file/latentsplat/latentsplat-main/venv310/lib/python3.10/site-packages/pytorch_lightning/loops/training_epoch_loop.py", line 138, in run
+    self.advance(data_fetcher)
+  File "/home/jilidut/download/file/latentsplat/latentsplat-main/venv310/lib/python3.10/site-packages/pytorch_lightning/loops/training_epoch_loop.py", line 244, in advance
+    batch_output = self.manual_optimization.run(kwargs)
+  File "/home/jilidut/download/file/latentsplat/latentsplat-main/venv310/lib/python3.10/site-packages/pytorch_lightning/loops/optimization/manual.py", line 94, in run
+    self.advance(kwargs)
+  File "/home/jilidut/download/file/latentsplat/latentsplat-main/venv310/lib/python3.10/site-packages/pytorch_lightning/loops/optimization/manual.py", line 114, in advance
+    training_step_output = call._call_strategy_hook(trainer, "training_step", *kwargs.values())
+  File "/home/jilidut/download/file/latentsplat/latentsplat-main/venv310/lib/python3.10/site-packages/pytorch_lightning/trainer/call.py", line 309, in _call_strategy_hook
+    output = fn(*args, **kwargs)
+  File "/home/jilidut/download/file/latentsplat/latentsplat-main/venv310/lib/python3.10/site-packages/pytorch_lightning/strategies/strategy.py", line 391, in training_step
+    return self.lightning_module.training_step(*args, **kwargs)
+  File "/home/jilidut/download/file/latentsplat/latentsplat-main/src/model/model_wrapper.py", line 474, in training_step
+    gaussians: VariationalGaussians = self.encoder(
+  File "/home/jilidut/download/file/latentsplat/latentsplat-main/venv310/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1518, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/jilidut/download/file/latentsplat/latentsplat-main/venv310/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1527, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/jilidut/download/file/latentsplat/latentsplat-main/src/model/encoder/encoder_epipolar.py", line 158, in forward
+    features, sampling = self.epipolar_transformer(
+  File "/home/jilidut/download/file/latentsplat/latentsplat-main/venv310/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1518, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/jilidut/download/file/latentsplat/latentsplat-main/venv310/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1527, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/jilidut/download/file/latentsplat/latentsplat-main/src/model/encoder/epipolar/epipolar_transformer.py", line 188, in forward
+    features = self.transformer.forward(
+  File "/home/jilidut/download/file/latentsplat/latentsplat-main/src/model/transformer/transformer.py", line 70, in forward
+    x = ff(x, **kwargs) + x
+  File "/home/jilidut/download/file/latentsplat/latentsplat-main/venv310/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1518, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/jilidut/download/file/latentsplat/latentsplat-main/venv310/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1527, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/jilidut/download/file/latentsplat/latentsplat-main/src/model/transformer/pre_norm.py", line 35, in forward
+    return self.fn(self.norm(x), **kwargs)
+  File "/home/jilidut/download/file/latentsplat/latentsplat-main/venv310/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1518, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/jilidut/download/file/latentsplat/latentsplat-main/venv310/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1527, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/jilidut/download/file/latentsplat/latentsplat-main/src/model/encoder/epipolar/epipolar_transformer.py", line 237, in forward
+    x = rearrange(x, "(b v h w) () c -> (b v) c h w", b=b, v=v, h=h, w=w)
+  File "/home/jilidut/download/file/latentsplat/latentsplat-main/venv310/lib/python3.10/site-packages/einops/einops.py", line 591, in rearrange
+    return reduce(tensor, pattern, reduction="rearrange", **axes_lengths)
+  File "/home/jilidut/download/file/latentsplat/latentsplat-main/venv310/lib/python3.10/site-packages/einops/einops.py", line 533, in reduce
+    raise EinopsError(message + "\n {}".format(e))
+einops.EinopsError:  Error while processing rearrange-reduction pattern "(b v h w) () c -> (b v) c h w".
+ Input tensor shape: torch.Size([16, 1, 128]). Additional info: {'b': 2, 'v': 2, 'h': -1, 'w': -1}.
+ Shape mismatch, 16 != 4
+
+Set the environment variable HYDRA_FULL_ERROR=1 for a complete stack trace.
+wandb: Waiting for W&B process to finish... (failed 1).
+wandb: - 0.000 MB of 0.000 MB uploaded (0.000 MB deduped)wandb: \ 0.000 MB of 0.000 MB uploaded (0.000 MB deduped)wandb:                                                                                
+wandb: You can sync this run to the cloud by running:
+wandb: wandb sync /home/jilidut/download/file/latentsplat/latentsplat-main/outputs/2025-09-15/16-12-56.185455/wandb/offline-run-20250915_161257-rwqvxi3s
+wandb: Find logs at: ./outputs/2025-09-15/16-12-56.185455/wandb/offline-run-20250915_161257-rwqvxi3s/logs

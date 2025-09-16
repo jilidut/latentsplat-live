@@ -44,7 +44,6 @@ class DecoderSplattingCUDA(Decoder[DecoderSplattingCUDACfg]):
     ) -> DecoderOutput:
         if render_output.feature is not None:
             features = rearrange(render_output.feature, "(b v) c h w -> b v c h w", b=b, v=v)
-            # NOTE background feature = 0 = mean = logvar (of normal distribution)
             mean, logvar = features.chunk(2, dim=2) if self.variational \
                 else (features, (1-rearrange(render_output.mask.detach(), "(b v) h w -> b v () h w", b=b, v=v)).log().expand_as(features))
             feature_posterior = DiagonalGaussianDistribution(mean, logvar)
@@ -71,15 +70,8 @@ class DecoderSplattingCUDA(Decoder[DecoderSplattingCUDACfg]):
         return_features: bool = True
     ) -> DecoderOutput:
         
-        print("[DEBUG] gaussians type:", type(gaussians))
-        print("[DEBUG] has color_harmonics:", hasattr(gaussians, 'color_harmonics'))
-        print("[DEBUG] has features:", hasattr(gaussians, 'features'))
-        
 
         b, v, _, _ = extrinsics.shape
-
-        print("[DEBUG] gaussians.color_harmonics is None:", gaussians.color_harmonics is None)
-        print("[DEBUG] hasattr(gaussians, 'features'):", hasattr(gaussians, 'features'))
 
         color_sh = repeat(gaussians.color_harmonics, "b g c d_sh -> (b v) g c d_sh", v=v) \
             if return_colors and gaussians.color_harmonics is not None else None
@@ -94,17 +86,8 @@ class DecoderSplattingCUDA(Decoder[DecoderSplattingCUDACfg]):
         if feature_sh is not None:
             feature_sh = feature_sh.to(device)
 
-        print("[DEBUG] means:", gaussians.means.shape, gaussians.means.device)
-        print("[DEBUG] cov:", gaussians.covariances.shape, gaussians.covariances.device)
-        print("[DEBUG] opac:", gaussians.opacities.shape, gaussians.opacities.device)
-        print("[DEBUG] color_sh:", color_sh.shape, color_sh.device)
-        print("[DEBUG] feature_sh:", feature_sh)  # 可能是 None
-
         H, W = color_sh.shape[-2:]   # 安全写法
-        print("[DEBUG] img_size:", (H, W))
 
-        print("[DEBUG] color_sh is None:", color_sh is None)
-        print("[DEBUG] feature_sh is None:", feature_sh is None)
         print("Gaussians fields:", dir(gaussians))
 
         from dataclasses import replace
@@ -125,7 +108,6 @@ class DecoderSplattingCUDA(Decoder[DecoderSplattingCUDACfg]):
             )
 
         # 2. 统一搬设备
-        # 2. 统一搬设备
         extrinsics = extrinsics.to(device)
         intrinsics = intrinsics.to(device)
         color_sh   = color_sh.to(device)
@@ -138,23 +120,21 @@ class DecoderSplattingCUDA(Decoder[DecoderSplattingCUDACfg]):
             covariances=gaussians.covariances.to(device),
             opacities=gaussians.opacities.to(device),
             color_harmonics=gaussians.color_harmonics.to(device),
-            # feature_harmonics=gaussians.feature_harmonics.to(device) if gaussians.feature_harmonics is not None else None,
             feature_harmonics=None,
         )
 
-        # ✅ 暴力兜底 scale
-        scale = getattr(gaussians, 'scale', None) or getattr(gaussians, 'scales', None) or torch.ones(gaussians.means.shape[0], device=gaussians.means.device)
-
-        print("[DEBUG] final device:", gaussians.means.device)
-        print("[DEBUG] color_sh device:", color_sh.device)
-        print("[DEBUG] feature_sh:", feature_sh)
-
-        # scale 如果存在也搬
-        if 'scale' in locals():
-            scale = scale.to(device)
-
-        # 4. 验证
-        print("[DEBUG] final device:", gaussians.means.device)
+        # ---------- 安全获取 scale ----------
+        if hasattr(gaussians, 'scales') and gaussians.scales is not None:
+            scale = gaussians.scales
+        elif hasattr(gaussians, 'scale') and gaussians.scale is not None:
+            scale = gaussians.scale
+        else:
+            import logging
+            logging.getLogger(__name__).warning(
+                "Neither 'scales' nor 'scale' found in gaussians, falling back to torch.ones"
+            )
+            scale = torch.ones(gaussians.means.shape[0], device=gaussians.means.device)
+        # ---------- scale 获取完毕 ----------
 
         # 5. 渲染
         rendered: RenderOutput = render_cuda(
@@ -198,6 +178,33 @@ class DecoderSplattingCUDA(Decoder[DecoderSplattingCUDACfg]):
             mode=mode,
         )
         return rearrange(result, "(b v) h w -> b v h w", b=b, v=v)
+    
+    from .cuda_splatting import render_cuda, RenderOutput
+
+    def render_rgb(
+        self,
+        gaussians: Gaussians,
+        extrinsics: Float[Tensor, "4 4"],  # 单个相机
+        intrinsics: Float[Tensor, "3 3"],
+        near: float,
+        far: float,
+        image_size: tuple[int, int],
+    ) -> Float[Tensor, "height width 3"]:
+        """单相机彩色渲染，供 GIF 回调使用"""
+        # 升维到 (1,1,...) 再扔给已有 forward
+        out: DecoderOutput = self(
+            gaussians,
+            extrinsics[None, None],
+            intrinsics[None, None],
+            torch.tensor([[near]], device=extrinsics.device),
+            torch.tensor([[far]], device=extrinsics.device),
+            image_size,
+            return_colors=True,
+            return_features=False,
+        )
+        # 取出颜色图并转到 HWC
+        rgb = out.color[0, 0].permute(1, 2, 0).clamp(0, 1)  # (H,W,3)
+        return rgb
 
 
     def last_layer_weights(self) -> None:

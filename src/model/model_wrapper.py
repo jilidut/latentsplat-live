@@ -48,7 +48,7 @@ from .types import Prediction, GroundTruth, VariationalGaussians, VariationalMod
 # ------------------------------------------------------------------ #
 #                          调试开关                                   #
 # ------------------------------------------------------------------ #
-DEBUG = True
+DEBUG = False
 
 def log(msg: str) -> None:
     if DEBUG:
@@ -139,8 +139,6 @@ class TrajectoryFn(Protocol):
         Float[Tensor, "batch view 3 3"],  # intrinsics
     ]:
         ...
-
-
 # ------------------------------------------------------------------ #
 #                      Lightning 封装                                 #
 # ------------------------------------------------------------------ #
@@ -191,11 +189,9 @@ class ModelWrapper(LightningModule):
         target_render_image_loss_cfg: LossGroupCfg | None = None,
         step_tracker: StepTracker | None = None,
     ) -> None:
-        
-        print("[ModelWrapper] target_render_image_loss_cfg =", target_render_image_loss_cfg)
-        print("[ModelWrapper] target_combined_loss_cfg =", target_combined_loss_cfg)
 
         super().__init__()
+        self.cfg = cfg 
         self.automatic_optimization = False
         log("[ModelWrapper] __init__ called")
         self.optimizer_cfg = optimizer_cfg
@@ -235,8 +231,6 @@ class ModelWrapper(LightningModule):
             log("[ModelWrapper] gaussian_loss_cfg is None")
             self.gaussian_losses = None
 
-        
-        print("[INIT] target_render_image_loss_cfg after fallback =", target_render_image_loss_cfg)
 
         # 补上这五行
         self.context_losses = get_loss_group("context", context_loss_cfg)
@@ -252,17 +246,20 @@ class ModelWrapper(LightningModule):
             freeze(self.encoder)
         if self.freeze_cfg.decoder:
             freeze(self.decoder)
-        if self.freeze_cfg.discriminator:            # ✅ 正确拼写
+        if self.freeze_cfg.discriminator:            
             freeze(self.discriminator)
 
         self.benchmarker = Benchmarker()
 
-        #         # 缓存学习率，供 configure_optimizers 使用
+        #  缓存学习率，供 configure_optimizers 使用
         self.generator_lr: float = 0.0
         self.autoencoder_lr: float = 0.0
         self.discriminator_lr: float = 0.0
         self._scale_factor = 1.0
-
+    
+    def load_state_dict(self, state_dict, strict=True):
+        # 强制 non-strict，容忍旧 checkpoint 缺少任何键
+        super().load_state_dict(state_dict, strict=False)
 
     def rescale(self, image: torch.Tensor, scale_factor: float) -> torch.Tensor:
         """Simple rescale by factor."""
@@ -274,8 +271,6 @@ class ModelWrapper(LightningModule):
 
         # 压成 4D
         image_4d = image.view(-1, c, h, w)
-
-        print(f"[DEBUG] interpolate 4D input shape: {image_4d.shape}")
 
         # 插值
         image_4d = torch.nn.functional.interpolate(
@@ -571,10 +566,8 @@ class ModelWrapper(LightningModule):
             generator_loss = generator_loss + group_loss
 
         if self.gaussian_losses is not None:
-            log(f"gaussian_losses.is_active(): {self.gaussian_losses.is_active(self.step_tracker.get_step())}")
             _, gaussian_loss_dict = self.gaussian_losses.forward_generator(
                 gaussian_pred, None, self.step_tracker.get_step(), self.last_layer_weight)
-            log(f"gaussian_loss_dict keys: {list(gaussian_loss_dict.keys())}")
         else:
             log("gaussian_losses is None, skipping forward_generator")
 
@@ -640,7 +633,6 @@ class ModelWrapper(LightningModule):
                         f"generator loss = {generator_loss:.6f}")
             if discriminator_loss is not None:
                 progress += f"; discriminator loss = {discriminator_loss:.6f}"
-            log(progress)
 
         self.log("loss/generator/total", generator_loss, prog_bar=True)
 
@@ -804,66 +796,112 @@ class ModelWrapper(LightningModule):
         if self.train_cfg.extended_visualization:
             self.render_video_interpolation_exaggerated(batch)
 
-    def test_step(self, batch: BatchedExample, batch_idx: int):
+    def test_step(self, batch: BatchedExample, batch_idx: int) -> None:
         batch = self.data_shim(batch)
-
         b, v = batch["target"]["image"].shape[:2]
-        # size = self.get_scaled_size(self.scale_factor, batch["target"]["image"].shape[-2:])
         size = self.get_scaled_size(1.0, batch["target"]["image"].shape[-2:])
-
         assert b == 1
-        if batch_idx % 100 == 0:
-            print(f"Test step {batch_idx:0>6}.")
 
         # ---------- 1. 编码 ----------
         if self.encode_latents:
-            with self.benchmarker.time("autoencoder_encoder", num_calls=batch["context"]["image"].shape[1]):
-                posterior = self.autoencoder.encode(batch["context"]["image"])
-                context_latents = posterior.sample()
+            posterior = self.autoencoder.encode(batch["context"]["image"])
+            context_latents = posterior.sample()
         else:
             context_latents = None
 
-        with self.benchmarker.time("encoder"):
-            gaussians: VariationalGaussians = self.encoder(
-                batch["context"],
-                self.step_tracker.get_step(),
-                features=context_latents,
-                deterministic=False,
-            )
-
         # ---------- 2. 渲染 ----------
-        with self.benchmarker.time("decoder", num_calls=v):
-            output = self.decoder.forward(
-                gaussians.sample() if self.variational in ("gaussians", "none") else gaussians.flatten(),
-                batch["target"]["extrinsics"],
-                batch["target"]["intrinsics"],
-                batch["target"]["near"],
-                batch["target"]["far"],
-                size,
+        gaussians: VariationalGaussians = self.encoder(
+            batch["context"],
+            self.step_tracker.get_step(),
+            features=context_latents,
+            deterministic=False,
+        )
+        output = self.decoder.forward(
+            gaussians.sample() if self.variational in ("gaussians", "none") else gaussians.flatten(),
+            batch["target"]["extrinsics"],
+            batch["target"]["intrinsics"],
+            batch["target"]["near"],
+            batch["target"]["far"],
+            size,
+        )
+
+        # ---------- 3. 解码 ----------
+        latent_sample = output.feature_posterior.sample()
+        z = self.rescale(latent_sample, Fraction(1, self.supersampling_factor))
+
+        # 1. 投影到 VAE 期望的通道数
+        if z.shape[-3] != self.autoencoder.latent_channels:
+            # 临时 1×1 卷积，权重随推理即可（也可换成 nn.Conv2d 注册）
+            z = torch.nn.functional.conv2d(
+                z,
+                weight=torch.randn(
+                    self.autoencoder.latent_channels,
+                    z.shape[-3], 1, 1,
+                    device=z.device,
+                    dtype=z.dtype,
+                ),
+                bias=None,
+                stride=1,
+                padding=0,
             )
 
-        # ---------- 3. 解码回图像 ----------
-        with self.benchmarker.time("autoencoder_decoder", num_calls=v):
-            latent_sample = output.feature_posterior.sample()
-            z = self.rescale(latent_sample, Fraction(1, self.supersampling_factor))
-            if self.autoencoder.expects_skip:
-                skip_z = torch.cat((output.color.detach(), latent_sample), dim=-3) \
-                    if self.autoencoder.expects_skip_extra else latent_sample
-            else:
-                skip_z = None
-            target_pred_image = self.autoencoder.decode(z, skip_z)
+        skip_z = (
+            torch.cat((output.color.detach(), latent_sample), dim=-3)
+            if self.autoencoder.expects_skip_extra
+            else latent_sample
+        ) if self.autoencoder.expects_skip else None
 
-        # ---------- 4. 保存图片 ----------
+        # 2. 后续插值、解码保持原逻辑
+        spatial_ndim = z.ndim - 2
+        spatial = z.shape[-spatial_ndim:]
+        target_spatial = tuple(round(s * 4) for s in spatial)
+        mode = "trilinear" if spatial_ndim == 3 else "bilinear"
+
+        z_big = torch.nn.functional.interpolate(
+            z, size=target_spatial, mode=mode, align_corners=False
+        )
+        print("z_big.shape:", z_big.shape)
+        # 当 skip_z 为 None 时直接整图 decode
+        # if skip_z is None:
+        #     torch.cuda.empty_cache()
+        #     pred_chunks = []
+        #     for z in z_big.chunk(2, dim=1):          # 2 份即可
+        #         z_cpu = z.cpu()                      # 搬到 CPU
+        #         with torch.no_grad():                # 省内存
+        #             ae_cpu = self.autoencoder.cpu()           # 模型搬 CPU
+        #             pred_cpu = ae_cpu.decode(z_cpu, None).sample
+        #             self.autoencoder.cuda()                   # 可选：搬回 GPU
+        #         pred_chunks.append(pred_cpu.cuda())  # 搬回 GPU
+        #         torch.cuda.empty_cache()
+        #     target_pred_big = torch.cat(pred_chunks, dim=1)
+        if skip_z is None:
+            torch.cuda.empty_cache()
+            z_cpu = z_big.cpu()
+            ae_cpu = self.autoencoder.cpu()
+            with torch.no_grad():
+                target_pred_big = ae_cpu.decode(z_cpu, None).sample.cuda()
+            self.autoencoder.cuda()
+        else:
+            z1, z2 = z_big[:, :45], z_big[:, 45:]
+            s1, s2 = skip_z[:, :45], skip_z[:, 45:]
+            p1 = self.autoencoder.decode(z1, s1)
+            p2 = self.autoencoder.decode(z2, s2)
+            target_pred_big = torch.cat([p1, p2], dim=1)
+        target_pred_image = torch.nn.functional.interpolate(
+            target_pred_big, size=spatial, mode=mode, align_corners=False
+        )
+
+        # 3. 提亮
+        target_pred_image = (target_pred_image - target_pred_image.min()).clamp_min(0) / \
+                            (target_pred_image.max() - target_pred_image.min()).clamp_min(1e-5)
+
+        # ---------- 4. 保存 ----------
         (scene,) = batch["scene"]
         context_index_str = "_".join(map(str, sorted(batch["context"]["index"][0].tolist())))
-        # name = get_cfg()["wandb"]["name"]
-        name = "debug"
-        # path = self.test_cfg.output_path / name
-        from pathlib import Path
-        path = Path(self.test_cfg.output_path) / name
-
+        path = Path(self.test_cfg.output_path) / "debug" / scene / context_index_str / "color"
+        path.mkdir(parents=True, exist_ok=True)
         for index, color in zip(batch["target"]["index"][0], target_pred_image[0]):
-            save_image(color, path / scene / context_index_str / f"color/{index:0>6}.png")
+            save_image(color, path / f"{index:0>6}.png")
 
     def on_test_end(self) -> None:
         name = get_cfg()["wandb"]["name"]

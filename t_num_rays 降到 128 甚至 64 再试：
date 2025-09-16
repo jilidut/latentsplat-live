@@ -1,0 +1,37 @@
+nohup: 忽略输入
+[DEBUG] Hydra config loaded from: main
+[36mSaving outputs to /home/jilidut/download/file/latentsplat/latentsplat-main/outputs/2025-09-15/11-18-16.753611.[39m
+[11:18:17] >>> 即将构建 Trainer
+GPU available: True (cuda), used: True
+TPU available: False, using: 0 TPU cores
+IPU available: False, using: 0 IPUs
+HPU available: False, using: 0 HPUs
+Using cache found in /home/jilidut/.cache/torch/hub/facebookresearch_dino_main
+[EncoderEpipolar] cfg.num_surfaces = 1
+[EncoderEpipolar] num_surfaces=1, adapter.d_in=118, total=120
+[DEBUG] cfg.loss = LossCfg(gaussian=LossGroupCfg(nll=[LossL1Cfg(name='l1', weight=1.0, apply_after_step=0)], generator=None, discriminator=None), context=None, target=TargetLossCfg(autoencoder=None, render=TargetRenderLossCfg(latent=None, image=LossGroupCfg(nll=[LossL1Cfg(name='l1', weight=1.0, apply_after_step=0)], generator=None, discriminator=None)), combined=None))
+[DEBUG] cfg.loss.gaussian = LossGroupCfg(nll=[LossL1Cfg(name='l1', weight=1.0, apply_after_step=0)], generator=None, discriminator=None)
+[11:18:24] >>> 即将实例化 ModelWrapper
+[DEBUG] get_loss_group called: name=gaussian, group_cfg=LossGroupCfg(nll=[LossL1Cfg(name='l1', weight=1.0, apply_after_step=0)], generator=None, discriminator=None)
+[INIT] LossL1 initialized with apply_after_step=0
+[DEBUG] get_loss_group called: name=context, group_cfg=None
+[DEBUG] get_loss_group called: name=target/autoencoder, group_cfg=None
+[DEBUG] get_loss_group called: name=target/render/latent, group_cfg=None
+[DEBUG] get_loss_group called: name=target/render/image, group_cfg=LossGroupCfg(nll=[LossL1Cfg(name='l1', weight=1.0, apply_after_step=0)], generator=None, discriminator=None)
+[INIT] LossL1 initialized with apply_after_step=0
+[DEBUG] get_loss_group called: name=target/combined, group_cfg=None
+[11:18:24] >>> 即将构造 DataModule
+[DEBUG] val num_workers = 4
+wandb: WARNING `resume` will be ignored since W&B syncing is set to `offline`. Starting a new run with run id dvejdywe.
+wandb: Tracking run with wandb version 0.12.17
+wandb: W&B syncing is set to `offline` in this directory.  
+wandb: Run `wandb online` or set WANDB_MODE=online to enable cloud syncing.
+Restoring states from the checkpoint path at outputs/2025-09-11/18-57-37.211572/checkpoints/snapshots/step052500.ckpt
+LOCAL_RANK: 0 - CUDA_VISIBLE_DEVICES: [0]
+Loaded model weights from the checkpoint at outputs/2025-09-11/18-57-37.211572/checkpoints/snapshots/step052500.ckpt
+[DEBUG] stage=test, data_stage=test
+[DEBUG] chunks=3, index=41
+[2025-09-15 11:18:38,568][py.warnings][WARNING] - /home/jilidut/download/file/latentsplat/latentsplat-main/venv310/lib/python3.10/site-packages/pytorch_lightning/utilities/data.py:121: Your `IterableDataset` has `__len__` defined. In combination with multi-process data loading (when num_workers > 1), `__len__` could be inaccurate if each worker is not configured independently to avoid having duplicate data.
+
+/usr/lib/python3.10/multiprocessing/resource_tracker.py:224: UserWarning: resource_tracker: There appear to be 6 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '

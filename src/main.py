@@ -33,6 +33,8 @@ from src.model.encoder import get_encoder
 from src.model.model_wrapper import ModelWrapper
 
 torch.set_float32_matmul_precision('medium')
+# import torch, pytorch_lightning as pl
+# torch.cuda.set_per_process_memory_fraction(0.95, 0)  # 留 5 % 余量
 
 def cyan(text: str) -> str:
     return f"{Fore.CYAN}{text}{Fore.RESET}"
@@ -51,11 +53,11 @@ def train(cfg_dict: DictConfig):
     torch.manual_seed(cfg_dict.seed)
 
     from omegaconf import OmegaConf
-    print("========== cfg_dict.loss ==========")
-    print(OmegaConf.to_yaml(cfg_dict.loss)) 
+    # print("========== cfg_dict.loss ==========")
+    # print(OmegaConf.to_yaml(cfg_dict.loss)) 
 
     print(f"[DEBUG] Hydra config loaded from: {hydra.core.hydra_config.HydraConfig.get().job.config_name}")
-    print(f"[DEBUG] Full config:\n{OmegaConf.to_yaml(cfg_dict)}")
+    # print(f"[DEBUG] Full config:\n{OmegaConf.to_yaml(cfg_dict)}")
 
     # Set up the output directory.
     output_dir = Path(hydra.core.hydra_config.HydraConfig.get()["runtime"]["output_dir"])

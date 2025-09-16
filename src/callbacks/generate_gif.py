@@ -2,6 +2,7 @@
 import math, torch, imageio
 from pathlib import Path
 from pytorch_lightning.utilities import rank_zero_only
+import numpy as np
 
 class GenerateGif:
     """
@@ -72,24 +73,32 @@ class GenerateGif:
                 }
 
                 # 2. 前向 -> 高斯
-                gaussians, _ = pl_module(batch)   # 返回 (gaussians, extra)
+                gaussians, _ = pl_module(batch)
 
-                # 3. visualizer 渲染
-                vis = pl_module.encoder_visualizer
-                pred = vis.render_panorama(gaussians,
-                                           camera,
-                                           (self.h, self.w))   # [1,3,H,W] 0-1
-                img = pred[0].clamp(0, 1)
-                img = (img * 255).byte().cpu().numpy().transpose(1, 2, 0)
+                # 3. 用 decoder 直接渲染单张 RGB
+                from src.model.decoder.decoder_splatting_cuda import DecoderSplattingCUDA
+                # decoder = DecoderSplattingCUDA(cfg=pl_module.cfg.decoder, background_color=[0,0,0])
+                decoder = DecoderSplattingCUDA(cfg=pl_module.cfg.model.decoder, background_color=[0,0,0])
+                pred = decoder.render_rgb(
+                    gaussians,
+                    batch["context"]["extrinsics"][0, 0],
+                    batch["context"]["intrinsics"][0, 0],
+                    batch["context"]["near"][0, 0].item(),
+                    batch["context"]["far"][0, 0].item(),
+                    (self.h, self.w),
+                )  # 返回 (H,W,3) 0-1
+
+                # 直接转 numpy 写 GIF
+                img = (pred.clamp(0, 1).cpu().numpy() * 255).astype(np.uint8)
                 images.append(img)
 
-        # 4. 保存 gif
-        step = trainer.global_step
-        gif_path = self.output_dir / f"step{step:06d}.gif"
-        imageio.mimsave(gif_path, images, fps=self.fps)
-        print(f"[GenerateGif] 环形视角 gif 已保存 → {gif_path}")
+                # 4. 保存 gif
+                step = trainer.global_step
+                gif_path = self.output_dir / f"step{step:06d}.gif"
+                imageio.mimsave(gif_path, images, fps=self.fps)
+                print(f"[GenerateGif] 环形视角 gif 已保存 → {gif_path}")
 
-        pl_module.train()          # 别忘了切回训练模式
+                pl_module.train()          # 别忘了切回训练模式
 
     # --------------------------------------------------
     def _build_camera(self, device, azim_deg):
