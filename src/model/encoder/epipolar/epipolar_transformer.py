@@ -204,7 +204,7 @@ class ConvFeedForward(nn.Module):
             nn.Linear(d_hidden, d_in),
             nn.Dropout(dropout),
         )
-        self.self_attention = nn.Identity()   # 先占位
+        self.self_attention = nn.Identity()  
         
 
     def forward(
@@ -215,17 +215,17 @@ class ConvFeedForward(nn.Module):
         h: int,
         w: int,
     ) -> Float[Tensor, "batch token dim"]:
-        if not self.training and x.size(1) == 1:   # 仅测试 & token=1
-            x = x.expand(-1, 2, -1)                # pad 到 S=2
+        if not self.training and x.size(1) == 1:   
+            x = x.expand(-1, 2, -1)                
         if self.training:
-            x = x.squeeze(1)                       # 训练正常走 (T,C)
+            x = x.squeeze(1)                      
             x = self.mlp(x) + x
-            return x.unsqueeze(1)                  # (T,1,C)
+            return x.unsqueeze(1)                
         else:
             T, S, C = x.shape
-            x = x.reshape(-1, C)        # (T*S, C)
+            x = x.reshape(-1, C)        
             x = self.mlp(x) + x
-            x = x.reshape(T, S, C)         # (T,S,C)
+            x = x.reshape(T, S, C)        
             return x 
        
         
