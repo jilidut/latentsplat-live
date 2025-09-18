@@ -126,14 +126,14 @@ datamodule:
 trainer:
   accelerator: gpu
   devices: 1
-  # precision: bf16-mixed   # 再省 15 % 显存
+  # precision: bf16-mixed   
   precision: 16
   max_steps: 200
   val_check_interval: 5000
   log_every_n_steps: 200
   strategy: auto
   # accumulate_grad_batches: 1
-  gradient_clip_val: null   # 手动优化，禁用裁剪
+  gradient_clip_val: null   
   device: cuda 
 
   logger:
@@ -141,7 +141,7 @@ trainer:
     save_dir: outputs/tensorboard
 
 generate_gif: false
-gif_interval: 25000  # 每 2.5 万步写一次，全程只写 8 张
+gif_interval: 25000  
 
 
 loss:
