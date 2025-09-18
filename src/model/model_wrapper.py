@@ -45,6 +45,7 @@ from .encoder import Encoder
 from .encoder.visualization.encoder_visualizer import EncoderVisualizer
 from .types import Prediction, GroundTruth, VariationalGaussians, VariationalMode
 
+
 # ------------------------------------------------------------------ #
 #                          调试开关                                   #
 # ------------------------------------------------------------------ #
@@ -106,6 +107,9 @@ class OptimizerCfg:
 @dataclass
 class TestCfg:
     output_path: Path
+    decode_tile: int = 64
+    num_rays: int = 64
+    num_points_per_ray: int = 64
 
 
 @dataclass
@@ -447,7 +451,7 @@ class ModelWrapper(LightningModule):
 
         # ---------- 生成器前向 ----------
         self.toggle_optimizer(g_opt)
-
+        
         latents_to_decode = {}
         context_latents   = None
 
@@ -861,35 +865,24 @@ class ModelWrapper(LightningModule):
             z, size=target_spatial, mode=mode, align_corners=False
         )
         print("z_big.shape:", z_big.shape)
-        # 当 skip_z 为 None 时直接整图 decode
-        # if skip_z is None:
-        #     torch.cuda.empty_cache()
-        #     pred_chunks = []
-        #     for z in z_big.chunk(2, dim=1):          # 2 份即可
-        #         z_cpu = z.cpu()                      # 搬到 CPU
-        #         with torch.no_grad():                # 省内存
-        #             ae_cpu = self.autoencoder.cpu()           # 模型搬 CPU
-        #             pred_cpu = ae_cpu.decode(z_cpu, None).sample
-        #             self.autoencoder.cuda()                   # 可选：搬回 GPU
-        #         pred_chunks.append(pred_cpu.cuda())  # 搬回 GPU
-        #         torch.cuda.empty_cache()
-        #     target_pred_big = torch.cat(pred_chunks, dim=1)
         if skip_z is None:
             torch.cuda.empty_cache()
-            z_cpu = z_big.cpu()
-            ae_cpu = self.autoencoder.cpu()
-            with torch.no_grad():
-                target_pred_big = ae_cpu.decode(z_cpu, None).sample.cuda()
-            self.autoencoder.cuda()
-        else:
-            z1, z2 = z_big[:, :45], z_big[:, 45:]
-            s1, s2 = skip_z[:, :45], skip_z[:, 45:]
-            p1 = self.autoencoder.decode(z1, s1)
-            p2 = self.autoencoder.decode(z2, s2)
-            target_pred_big = torch.cat([p1, p2], dim=1)
-        target_pred_image = torch.nn.functional.interpolate(
-            target_pred_big, size=spatial, mode=mode, align_corners=False
-        )
+            # 5 维已压成 4 维 (B,V,C,H,W)
+            b, v, c, h, w = z_big.shape
+            tile = self.cfg.test.decode_tile          # 读配置
+            if tile <= 0 or h <= tile and w <= tile:  # 整图模式（A100）
+                with torch.no_grad():
+                    target_pred_big = self.autoencoder.decode(z_big, None).sample
+            else:                                       # 分块模式（小卡）
+                target_pred_big = torch.zeros_like(z_big[:, :, :3])
+                for i in range(0, h, tile):
+                    for j in range(0, w, tile):
+                        z_tile = z_big[:, :, :, i:i+tile, j:j+tile]
+                        with torch.no_grad():
+                            pred_tile = self.autoencoder.decode(z_tile, None).sample
+                        target_pred_big[:, :, :, i:i+tile, j:j+tile] = pred_tile
+                        del pred_tile
+                torch.cuda.empty_cache()
 
         # 3. 提亮
         target_pred_image = (target_pred_image - target_pred_image.min()).clamp_min(0) / \

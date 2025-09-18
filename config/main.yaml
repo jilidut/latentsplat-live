@@ -110,12 +110,15 @@ train:
 
 test:
   output_path: outputs/test
+  num_rays: 64
+  num_points_per_ray: 64
+  decode_tile: 64
 
 seed: 111123
 
 datamodule:
-  batch_size: 20          # 12 GB 安全值，256² 也不会爆
-  num_workers: 4          # 单卡 4 核足够
+  batch_size: 20          
+  num_workers: 4          
   pin_memory: true
   base_resolution: 128
   resolution_anneal: true
@@ -131,6 +134,7 @@ trainer:
   strategy: auto
   # accumulate_grad_batches: 1
   gradient_clip_val: null   # 手动优化，禁用裁剪
+  device: cuda 
 
   logger:
     _target_: pytorch_lightning.loggers.TensorBoardLogger
