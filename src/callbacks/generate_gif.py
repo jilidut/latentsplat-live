@@ -86,6 +86,7 @@ class GenerateGif:
                     batch["context"]["near"][0, 0].item(),
                     batch["context"]["far"][0, 0].item(),
                     (self.h, self.w),
+                    # tuple(pl_module.cfg.dataset.image_shape),
                 )  # 返回 (H,W,3) 0-1
 
                 # 直接转 numpy 写 GIF

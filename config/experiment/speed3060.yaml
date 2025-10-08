@@ -23,13 +23,12 @@ trainer:
 model:
   encoder:
     epipolar:
+      # num_samples: 484
       num_samples: 196
       epipolar_transformer:
         num_layers: 1
         num_heads: 4
       gaussians_per_pixel: 1
-
-# dataset.image_shape: [184, 184]
 
 loss:
   gaussian:
@@ -45,4 +44,4 @@ loss:
             weight: 1.0
             apply_after_step: 0
 
-dataset.image_shape: [184, 184]
+dataset.image_shape: [256,256]

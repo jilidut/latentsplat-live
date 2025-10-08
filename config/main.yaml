@@ -9,6 +9,7 @@ defaults:
   - experiment: speed3060 
   - _self_
 
+seed: 111123  # 全局随机种子
 
 model:
   supersampling_factor: 1
@@ -39,17 +40,34 @@ freeze:
   decoder: false
   discriminator: false
 
-
 hydra:
   run:
     dir: ./outputs/${now:%Y-%m-%d}/${now:%H-%M-%S.%f}
+  job_logging:
+    version: 1
+    formatters:
+      simple:
+        format: "[%(asctime)s] %(levelname)s: %(message)s"
+    handlers:
+      console:
+        class: logging.StreamHandler
+        formatter: simple
+        stream: ext://sys.stdout
+      file:
+        class: logging.FileHandler
+        formatter: simple
+        filename: ${hydra:run.dir}/run.log
+    root:
+      level: INFO
+      handlers: [console, file]
 
 wandb:
   project: latentsplat
   entity: placeholder
-  name: placeholder
+  name: "latentsplat_200k_${now:%Y%m%d_%H%M%S}"
   mode: online
   activated: true
+  tags: ["a100", "200k_steps", "final_training"]
 
 mode: train
 
@@ -58,20 +76,22 @@ dataset:
 
 data_loader:
   train:
-    num_workers: 16
+    num_workers: 8
+    batch_size: 4
     persistent_workers: true
-    batch_size: 2
-    seed: 1234
+    prefetch_factor: 2
+    pin_memory: true
+    worker_init_fn: ${hydra:runtime.seed}
   test:
     num_workers: 4
+    batch_size: 2
     persistent_workers: false
-    batch_size: 1
-    seed: 2345
+    pin_memory: true
   val:
     num_workers: 4
-    persistent_workers: true
     batch_size: 1
-    seed: 3456
+    persistent_workers: true
+    pin_memory: true
 
 optimizer:
   generator:
@@ -83,10 +103,10 @@ optimizer:
     autoencoder_kwargs:
       betas: [0.5, 0.9]
     scheduler:
-      name: LinearLR
+      name: CosineAnnealingLR
       kwargs:
-        start_factor: 5.e-4
-        total_iters: 2000
+        T_max: 200000
+        eta_min: 1.0e-6
     gradient_clip_val: 0.5
   discriminator:
     name: Adam
@@ -98,8 +118,8 @@ optimizer:
 checkpointing:
   load: null
   resume: false
-  every_n_train_steps: 2500
-  save_top_k: -1
+  every_n_train_steps: 10000
+  save_top_k: 5
 
 train:
   depth_mode: null
@@ -110,39 +130,24 @@ train:
 
 test:
   output_path: outputs/test
-  num_rays: 64
-  num_points_per_ray: 64
-  decode_tile: 64
-
-seed: 111123
-
-datamodule:
-  batch_size: 20          
-  num_workers: 4          
-  pin_memory: true
-  base_resolution: 128
-  resolution_anneal: true
+  num_rays: 256
+  num_points_per_ray: 256
+  decode_tile: 512
+  save_all_results: true
 
 trainer:
   accelerator: gpu
-  devices: 1
-  # precision: bf16-mixed   
-  precision: 16
-  max_steps: 200
+  devices: 2
+  precision: bf16-mixed
+  max_steps: 200001
   val_check_interval: 5000
-  log_every_n_steps: 200
-  strategy: auto
-  # accumulate_grad_batches: 1
-  gradient_clip_val: null   
-  device: cuda 
-
-  logger:
-    _target_: pytorch_lightning.loggers.TensorBoardLogger
-    save_dir: outputs/tensorboard
-
-generate_gif: false
-gif_interval: 25000  
-
+  log_every_n_steps: 5
+  strategy: ddp_find_unused_parameters_true
+  accumulate_grad_batches: 1
+  gradient_clip_val: null
+  profiler: simple
+  detect_anomaly: true
+  sync_batchnorm: true
 
 loss:
   gaussian:
@@ -152,8 +157,11 @@ loss:
         apply_after_step: 0
   target:
     render:
-      image:          # ← 必须显式声明 image
+      image:
         nll:
           - name: l1
             weight: 1.0
             apply_after_step: 0
+
+generate_gif: false
+gif_interval: 25000

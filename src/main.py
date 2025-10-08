@@ -142,7 +142,7 @@ def train(cfg_dict: DictConfig):
         callbacks=callbacks,
         val_check_interval=cfg.trainer.val_check_interval,
         check_val_every_n_epoch=None,
-        enable_progress_bar=False,
+        enable_progress_bar=True,
         gradient_clip_val=cfg.trainer.gradient_clip_val,
         max_steps=cfg.trainer.max_steps,
     )

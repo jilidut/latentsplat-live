@@ -1,0 +1,9 @@
+{
+    "python.analysis.extraPaths": ["."],
+    "python.defaultInterpreterPath": "/home/gengqt/.conda/envs/venv310/bin/python",
+    "python.analysis.typeCheckingMode": "off",
+    "python.analysis.diagnosticSeverityOverrides": {
+        "reportUnboundVariable": "none",
+        "reportAttributeAccessIssue": "none"
+    }
+}

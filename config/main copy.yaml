@@ -1,0 +1,187 @@
+# config/main.yaml
+defaults:
+  - dataset: re10k
+  - optional dataset/view_sampler_dataset_specific_config: ${dataset/view_sampler}_${dataset}
+  - model/autoencoder: kl_f8
+  - model/encoder: epipolar
+  - model/decoder: splatting_cuda
+  - optional model/discriminator: null
+  - experiment: speed3060 
+  - _self_
+
+
+model:
+  supersampling_factor: 1
+  encode_latents: false
+  encoder:
+    epipolar:
+      num_samples: 196          
+    epipolar_transformer:       
+      num_context_views: 2
+      num_samples: 484
+      num_layers: 1
+      num_heads: 4
+      downscale: 4
+      d_dot: 128
+      d_mlp: 256
+      self_attention:
+        patch_size: 4
+        num_octaves: 10
+        num_layers: 1
+        num_heads: 4
+        d_token: 128
+        d_dot: 128
+        d_mlp: 256
+
+freeze:
+  autoencoder: false
+  encoder: false
+  decoder: false
+  discriminator: false
+
+hydra:
+  run:
+    dir: ./outputs/${now:%Y-%m-%d}/${now:%H-%M-%S.%f}
+  job_logging:
+    version: 1
+    formatters:
+      simple:
+        format: "[%(asctime)s] %(levelname)s: %(message)s"
+    handlers:
+      console:
+        class: logging.StreamHandler
+        formatter: simple
+        stream: ext://sys.stdout
+      file:
+        class: logging.FileHandler
+        formatter: simple
+        filename: ${hydra:run.dir}/test.log
+    root:
+      level: INFO
+      handlers: [console, file]
+
+wandb:
+  project: latentsplat
+  entity: placeholder
+  name: gengqt
+  mode: online
+  activated: true
+
+mode: train
+
+dataset:
+  overfit_to_scene: null
+
+data_loader:
+  train:
+    num_workers: 8           # A100建议8-12个workers
+    batch_size: 4            # 根据A100内存调整
+    persistent_workers: true
+    prefetch_factor: 2       # 减少预取，避免内存占用过高
+    pin_memory: true         # 启用内存锁页，加速GPU传输
+    
+  test:
+    num_workers: 4
+    batch_size: 2
+    persistent_workers: false
+    pin_memory: true
+    
+  val:
+    num_workers: 4
+    batch_size: 1
+    persistent_workers: true
+    pin_memory: true
+
+optimizer:
+  generator:
+    name: Adam
+    autoencoder_lr: 9.0e-6 
+    scale_autoencoder_lr: true
+    lr: 1.5e-4
+    scale_lr: false
+    autoencoder_kwargs:
+      betas: [0.5, 0.9]
+    scheduler:
+      name: CosineAnnealingLR
+      kwargs:
+        T_max: 200000  # 余弦周期为200000步
+        eta_min: 1.0e-6  # 最小学习率
+    gradient_clip_val: 0.5
+  discriminator:
+    name: Adam
+    lr: 9.0e-6 
+    scale_lr: true
+    kwargs:
+      betas: [0.5, 0.9]
+
+checkpointing:
+  load: null
+  resume: false
+  every_n_train_steps: 10000
+  save_top_k: 5
+
+train:
+  depth_mode: null
+  extended_visualization: false
+  step_offset: 0
+  video_interpolation: false
+  video_wobble: false
+
+test:
+  output_path: outputs/test
+  num_rays: 256        # 经过20万步训练，可以测试更高分辨率
+  num_points_per_ray: 256
+  decode_tile: 512     # A100内存更大
+  save_all_results: true
+
+seed: 111123
+
+trainer:
+  strategy: ddp_find_unused_parameters_true  # 明确使用DDP策略
+  devices: auto                             # 自动检测GPU数量
+  precision: bf16-mixed                     # A100支持bf16，性能更好
+  accelerator: gpu
+  sync_batchnorm: true   
+  devices: 2 
+  max_steps: 200001
+  val_check_interval: 5000
+  log_every_n_steps: 100
+  accumulate_grad_batches: 1
+  gradient_clip_val: null   
+  # device: cuda 
+  profiler: simple                          # 简单性能分析
+  detect_anomaly: true                      # 检测数值异常
+
+  logger:
+    _target_: pytorch_lightning.loggers.TensorBoardLogger
+    save_dir: outputs/tensorboard
+
+generate_gif: false
+gif_interval: 25000  
+
+
+# loss:
+#   gaussian:
+#     nll:
+#       - name: l1
+#         weight: 1.0
+#         apply_after_step: 0
+#         decay_after_step: 100000  # 10万步后开始衰减
+#         decay_rate: 0.5
+#   target:
+#     render:
+#       image:          # ← 必须显式声明 image
+#         nll:
+#           - name: l1
+#             weight: 1.0
+#             apply_after_step: 5000 
+
+loss:
+  gaussian:
+    nll:
+      - name: l1
+        weight: 
+          start: 1.0
+          end: 0.1
+          decay_type: cosine  # 使用余弦衰减更平滑
+        apply_after_step: 1000  # 稍晚开始应用

@@ -36,13 +36,13 @@ epipolar_transformer:
   num_octaves: 10
   num_layers: 2
   num_heads: 4
-  num_samples: 484
+  num_samples: 32
   d_dot: 128
   d_mlp: 256
-  downscale: 4
+  downscale: 1
 
 visualizer:
-  num_samples: 484
+  num_samples: 8
   min_resolution: 256
   export_ply: false
   vis_epipolar_samples: false

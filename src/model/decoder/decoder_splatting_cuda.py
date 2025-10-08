@@ -3,17 +3,16 @@ from dataclasses import dataclass
 from typing import Literal
 from dataclasses import replace
 
-import torch
+import torch  
 from einops import rearrange, repeat
 from jaxtyping import Float
 from torch import Tensor
-
+from torch.utils.cpp_extension import load_inline
 from ..diagonal_gaussian_distribution import DiagonalGaussianDistribution
 from ..types import Gaussians
 from .cuda_splatting import DepthRenderingMode, render_cuda, RenderOutput, render_depth_cuda
 from .decoder import Decoder, DecoderOutput
-
-
+ 
 @dataclass
 class DecoderSplattingCUDACfg:
     name: Literal["splatting_cuda"]
@@ -40,23 +39,56 @@ class DecoderSplattingCUDA(Decoder[DecoderSplattingCUDACfg]):
         self,
         render_output: RenderOutput,
         b: int,
-        v: int
+        v: int,
+        image_shape: tuple[int, int]
     ) -> DecoderOutput:
+
+        # --- 1. 颜色图：已经是 4-D，直接 rearrange ---
+        color = rearrange(render_output.color, "(b v) c h w -> b v c h w", b=b, v=v) \
+            if render_output.color is not None else None
+
+        # --- mask ---
+        if render_output.mask.ndim == 2:          # [BV, H*W]
+            flat_len = render_output.mask.shape[1]
+            hw = int(flat_len ** 0.5)
+            while flat_len % hw:
+                hw -= 1
+            ww = flat_len // hw
+            mask_3d = render_output.mask.view(b * v, hw, ww)
+        else:                                     # [BV, H, W]
+            mask_3d = render_output.mask
+
+        # --- depth ---
+        if render_output.depth.ndim == 2:         # [BV, H*W]
+            flat_len = render_output.depth.shape[1]
+            hw = int(flat_len ** 0.5)
+            while flat_len % hw:
+                hw -= 1
+            ww = flat_len // hw
+            depth_3d = render_output.depth.view(b * v, hw, ww)
+        else:                                     # [BV, H, W]
+            depth_3d = render_output.depth
+
+        # --- 3. rearrange 到 [B, V, H, W] ---
+        mask  = rearrange(mask_3d,  "(b v) h w -> b v h w", b=b, v=v)
+        depth = rearrange(depth_3d, "(b v) h w -> b v h w", b=b, v=v)
+
         if render_output.feature is not None:
             features = rearrange(render_output.feature, "(b v) c h w -> b v c h w", b=b, v=v)
             mean, logvar = features.chunk(2, dim=2) if self.variational \
-                else (features, (1-rearrange(render_output.mask.detach(), "(b v) h w -> b v () h w", b=b, v=v)).log().expand_as(features))
+                else (features,
+                    (1 - rearrange(mask_3d, "(b v) h w -> b v h w", b=b, v=v).unsqueeze(2).detach()).log().expand_as(features))
             feature_posterior = DiagonalGaussianDistribution(mean, logvar)
         else:
             feature_posterior = None
+
         return DecoderOutput(
-            color=rearrange(render_output.color, "(b v) c h w -> b v c h w", b=b, v=v) if render_output.color is not None else None,
+            color=color,
             feature_posterior=feature_posterior,
-            mask=rearrange(render_output.mask, "(b v) h w -> b v h w", b=b, v=v),
-            depth=rearrange(render_output.depth, "(b v) h w -> b v h w", b=b, v=v)
+            mask=mask,
+            depth=depth,
         )
     
-   
     def forward(
         self,
         gaussians: Gaussians,
@@ -69,74 +101,61 @@ class DecoderSplattingCUDA(Decoder[DecoderSplattingCUDACfg]):
         return_colors: bool = True,
         return_features: bool = True
     ) -> DecoderOutput:
-        
-
         b, v, _, _ = extrinsics.shape
-
-        color_sh = repeat(gaussians.color_harmonics, "b g c d_sh -> (b v) g c d_sh", v=v) \
-            if return_colors and gaussians.color_harmonics is not None else None
-        
-        feature_sh = repeat(gaussians.features, "b g c d_sh -> (b v) g c d_sh", v=v) \
-            if return_features and hasattr(gaussians, 'features') and gaussians.features is not None else None
-        
-
-        # 确保所有张量在同一设备
-        device = gaussians.means.device
-        color_sh = color_sh.to(device)
-        if feature_sh is not None:
-            feature_sh = feature_sh.to(device)
-
-        H, W = color_sh.shape[-2:]   # 安全写法
-
-        print("Gaussians fields:", dir(gaussians))
-
-        from dataclasses import replace
-
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        # 1. 裁剪高斯
-        max_gaussians = 1_000
-        if gaussians.means.shape[0] > max_gaussians:
-            idx = torch.randperm(gaussians.means.shape[0], device=device)[:max_gaussians]
-            gaussians = replace(
-                gaussians,
-                means=gaussians.means[idx],
-                covariances=gaussians.covariances[idx],
-                opacities=gaussians.opacities[idx],
-                color_harmonics=gaussians.color_harmonics[idx],
-                feature_harmonics=gaussians.feature_harmonics[idx] if gaussians.feature_harmonics is not None else None,
-            )
+        print(f"[DECODER_DEBUG] return_features parameter: {return_features}")
+        print(f"[DECODER_DEBUG] Gaussians has feature_harmonics: {hasattr(gaussians, 'feature_harmonics')}")
 
-        # 2. 统一搬设备
+        # 处理颜色谐波
+        color_sh = None
+        if return_colors and hasattr(gaussians, 'color_harmonics') and gaussians.color_harmonics is not None:
+            color_sh = repeat(gaussians.color_harmonics, "b g c d_sh -> (b v) g c d_sh", v=v).to(device)
+
+        # 处理特征谐波
+        feature_sh = None
+        if return_features and hasattr(gaussians, 'feature_harmonics') and gaussians.feature_harmonics is not None:
+            feature_sh = repeat(gaussians.feature_harmonics, "b g c d_sh -> (b v) g c d_sh", v=v).to(device)
+        else:
+            print("feature_harmonics is None or not available")
+
+        # 确保至少有一种谐波系数（修复AssertionError）
+        if color_sh is None and feature_sh is None:
+            # 创建默认的颜色谐波（白色）
+            num_gaussians = gaussians.means.shape[1]
+            color_sh = torch.ones((b*v, num_gaussians, 3, 1), device=device)
+            print("Using default white color SH coefficients")
+
+        # 确保所有张量在同一设备
         extrinsics = extrinsics.to(device)
         intrinsics = intrinsics.to(device)
-        color_sh   = color_sh.to(device)
-        if feature_sh is not None:
-            feature_sh = feature_sh.to(device)
+        near = near.to(device)
+        far = far.to(device)
 
-        gaussians = replace(
-            gaussians,
-            means=gaussians.means.to(device),
-            covariances=gaussians.covariances.to(device),
-            opacities=gaussians.opacities.to(device),
-            color_harmonics=gaussians.color_harmonics.to(device),
-            feature_harmonics=None,
-        )
-
-        # ---------- 安全获取 scale ----------
-        if hasattr(gaussians, 'scales') and gaussians.scales is not None:
-            scale = gaussians.scales
-        elif hasattr(gaussians, 'scale') and gaussians.scale is not None:
-            scale = gaussians.scale
-        else:
-            import logging
-            logging.getLogger(__name__).warning(
-                "Neither 'scales' nor 'scale' found in gaussians, falling back to torch.ones"
+        # 截断高斯（如果数量太多）
+        max_gaussians = 1_000
+        if gaussians.means.shape[1] > max_gaussians:
+            idx = torch.randperm(gaussians.means.shape[1], device=device)[:max_gaussians]
+            gaussians = replace(
+                gaussians,
+                means=gaussians.means[:, idx],
+                covariances=gaussians.covariances[:, idx],
+                opacities=gaussians.opacities[:, idx],
+                color_harmonics=gaussians.color_harmonics[:, idx] if gaussians.color_harmonics is not None else None,
+                feature_harmonics=gaussians.feature_harmonics[:, idx] if hasattr(gaussians, 'feature_harmonics') and gaussians.feature_harmonics is not None else None,
             )
-            scale = torch.ones(gaussians.means.shape[0], device=gaussians.means.device)
-        # ---------- scale 获取完毕 ----------
+            
+        print(">>> Rasterizer input check")
+        print("   means  - shape:", gaussians.means.shape,
+              "min:", gaussians.means.min().item(), "max:", gaussians.means.max().item())
+        print("   covs   - shape:", gaussians.covariances.shape,
+              "min:", gaussians.covariances.min().item(), "max:", gaussians.covariances.max().item())
+        print("   opacs  - shape:", gaussians.opacities.shape,
+              "min:", gaussians.opacities.min().item(), "max:", gaussians.opacities.max().item())
+        print(">>> torch.isnan(means).any():", torch.isnan(gaussians.means).any(),
+              "torch.isinf(means).any():", torch.isinf(gaussians.means).any())
 
-        # 5. 渲染
+        # 渲染 - 修复：同时传递 color_sh 和 feature_sh
         rendered: RenderOutput = render_cuda(
             rearrange(extrinsics, "b v i j -> (b v) i j"),
             rearrange(intrinsics, "b v i j -> (b v) i j"),
@@ -147,10 +166,26 @@ class DecoderSplattingCUDA(Decoder[DecoderSplattingCUDACfg]):
             repeat(gaussians.means, "b g xyz -> (b v) g xyz", v=v),
             repeat(gaussians.covariances, "b g i j -> (b v) g i j", v=v),
             repeat(gaussians.opacities, "b g -> (b v) g", v=v),
-            color_sh,
-            feature_sh,
+            color_sh,  # 修复：传递 color_sh
+            feature_sh,  # 修复：传递 feature_sh
         )
-        out = self.render_to_decoder_output(rendered, b, v)
+        # ---- 补丁：若 cuda 端没返回 feature，手工造一份 ----
+        if rendered.feature is None and return_features:
+            # 与下游期望的 [BV, C, H, W] 对齐
+            b, v = extrinsics.shape[:2]
+            h, w = image_shape
+            c = 4          # 下游 DiagonalGaussian 需要 mean/logvar 各 2 → 共 4
+            rendered.feature = torch.zeros(
+                (b*v, c, h, w), device=rendered.color.device, dtype=rendered.color.dtype
+            )
+        print(f"[DECODER_DEBUG] Render output:")
+        print(f"[DECODER_DEBUG] - color: {rendered.color.shape if rendered.color is not None else 'None'}")
+        print(f"[DECODER_DEBUG] - feature: {rendered.feature.shape if rendered.feature is not None else 'None'}")
+        print(f"[DECODER_DEBUG] - mask: {rendered.mask.shape if rendered.mask is not None else 'None'}")
+        print(f"[DECODER_DEBUG] - depth: {rendered.depth.shape if rendered.depth is not None else 'None'}")
+
+        out = self.render_to_decoder_output(rendered, b, v, image_shape)
+        
         if depth_mode is not None and depth_mode != "depth":
             out.depth = self.render_depth(gaussians, extrinsics, intrinsics, near, far, image_shape, depth_mode)
         return out
@@ -158,13 +193,13 @@ class DecoderSplattingCUDA(Decoder[DecoderSplattingCUDACfg]):
     def render_depth(
         self,
         gaussians: Gaussians,
-        extrinsics: Float[Tensor, "batch view 4 4"],
-        intrinsics: Float[Tensor, "batch view 3 3"],
-        near: Float[Tensor, "batch view"],
-        far: Float[Tensor, "batch view"],
+        extrinsics: Float[Tensor, "batch view 4 4"], # type: ignore
+        intrinsics: Float[Tensor, "batch view 3 3"], # type: ignore
+        near: Float[Tensor, "batch view"], # type: ignore
+        far: Float[Tensor, "batch view"], # type: ignore
         image_shape: tuple[int, int],
         mode: DepthRenderingMode = "depth",
-    ) -> Float[Tensor, "batch view height width"]:
+    ) -> Float[Tensor, "batch view height width"]: # type: ignore
         b, v, _, _ = extrinsics.shape
         result = render_depth_cuda(
             rearrange(extrinsics, "b v i j -> (b v) i j"),
@@ -178,8 +213,6 @@ class DecoderSplattingCUDA(Decoder[DecoderSplattingCUDACfg]):
             mode=mode,
         )
         return rearrange(result, "(b v) h w -> b v h w", b=b, v=v)
-    
-    from .cuda_splatting import render_cuda, RenderOutput
 
     def render_rgb(
         self,
@@ -207,5 +240,8 @@ class DecoderSplattingCUDA(Decoder[DecoderSplattingCUDACfg]):
         return rgb
 
 
-    def last_layer_weights(self) -> None:
+    # def last_layer_weights(self) -> None:
+    #     return None
+    @property
+    def last_layer_weights(self) -> Tensor | None:
         return None

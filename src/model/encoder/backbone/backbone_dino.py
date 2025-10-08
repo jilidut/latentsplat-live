@@ -85,4 +85,5 @@ class BackboneDino(Backbone):
 
     @property
     def patch_size(self) -> int:
+        print(">>> cfg.model:", self.cfg.model)  
         return int("".join(filter(str.isdigit, self.cfg.model)))

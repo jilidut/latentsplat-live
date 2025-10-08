@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from fractions import Fraction
 from typing import Literal, Optional
 
+# import torch.nn.functional as F
 import torch
 from einops import rearrange
 from jaxtyping import Float
@@ -68,7 +69,7 @@ class EncoderEpipolar(Encoder[EncoderEpipolarCfg]):
         variational: bool
     ) -> None:
         super().__init__(cfg, variational)
-
+        # scale_factor = Fraction(1, 1)
         print(f"[EncoderEpipolar] cfg.num_surfaces = {cfg.num_surfaces}")
 
         self.backbone = get_backbone(cfg.backbone, d_in, cfg.d_backbone, scale_factor)
@@ -89,6 +90,7 @@ class EncoderEpipolar(Encoder[EncoderEpipolarCfg]):
             cfg.num_surfaces,
             cfg.use_transmittance,
         )
+        print("[DepthPredictor] num_samples =", cfg.num_monocular_samples)
         self.gaussian_adapter = GaussianAdapter(
             cfg.gaussian_adapter, 
             2 * n_feature_channels if variational else n_feature_channels   # NOTE double the number of features in case of variational
@@ -140,8 +142,7 @@ class EncoderEpipolar(Encoder[EncoderEpipolarCfg]):
         deterministic: bool = False,
         visualization_dump: Optional[dict] = None,
     ) -> VariationalGaussians:
-        print("[Encoder] forward received context type:", type(context))
-        print("[Encoder] context keys:", context.keys() if isinstance(context, dict) else "Not a dict!")
+        print("[Encoder] features input shape =", features.shape if features is not None else "None")
         b, v = context["image"].shape[:2]
         if features is None:
             # Encode the context images from scratch
@@ -149,10 +150,12 @@ class EncoderEpipolar(Encoder[EncoderEpipolarCfg]):
         features = self.backbone(features)
         device = features.device
         h, w = features.shape[-2:]
+        print(">>> actual (h, w):", h, w)
         features = rearrange(features, "(b v) c h w -> b v h w c", b=b, v=v)
         features = self.backbone_projection(features)
         features = rearrange(features, "b v h w c -> b v c h w")
-
+        print("image shape:", context["image"].shape)
+        print("features after backbone:", features.shape)
         # Run the epipolar transformer.
         if self.cfg.use_epipolar_transformer:
             features, sampling = self.epipolar_transformer(
@@ -169,17 +172,8 @@ class EncoderEpipolar(Encoder[EncoderEpipolarCfg]):
             skip = self.high_resolution_skip(skip)
             features = features + rearrange(skip, "(b v) c h w -> b v c h w", b=b, v=v)
 
-
-        print(f"[encoder] features @ forward entry: {features.shape}")
-
-        # === 1. 先记录 backbone 空间分辨率 ===
-        hb, wb = features.shape[-2:]          # 20, 20
-        print(f"[ENCODER_DEBUG] hb={hb}, wb={wb}")
-
-        # === 2. 再压扁成序列 ===
+        # Sample depths from the resulting features.
         features = rearrange(features, "b v c h w -> b v (h w) c")
-
-        # === 3. 深度预测（只接受序列） ===
         depths, densities = self.depth_predictor.forward(
             features,
             context["near"],
@@ -187,57 +181,37 @@ class EncoderEpipolar(Encoder[EncoderEpipolarCfg]):
             deterministic,
             1 if deterministic else self.cfg.gaussians_per_pixel,
         )
-
-        # === 4. 用原始分辨率生成射线格子 ===
-        xy_ray, _ = sample_image_grid((hb, wb), device)          # [20, 20, 2]
-        xy_ray = rearrange(xy_ray, "h w xy -> (h w) () xy")      # [400, 1, 2]
-        print(f"[ENCODER_DEBUG] xy_ray.shape={xy_ray.shape}")
-
-        print(f"[encoder] features before to_gaussians: {features.shape}")
+        print("features before to_gaussians:", features.shape)
+        # Convert the features and depths into Gaussians.
+        xy_ray, _ = sample_image_grid((h, w), device)
+        xy_ray = rearrange(xy_ray, "h w xy -> (h w) () xy")
         gaussians = rearrange(
             self.to_gaussians(features),
             "... (srf c) -> ... srf c",
             srf=self.cfg.num_surfaces,
         )
+        print(">>> xy_ray.shape:", xy_ray.shape)
+        print("gaussians shape:", gaussians.shape)
         offset_xy = gaussians[..., :2].sigmoid()
-
-        # 在 182 行之前加一行
-        print(f"[encoder] (w, h) = ({w}, {h})")
-        # ✅ 正确：用 backbone 分辨率计算 pixel_size
-        pixel_size = 1 / torch.tensor((wb, hb), dtype=torch.float32, device=device)
-
-        print(f"[encoder] xy_ray.shape = {xy_ray.shape}")
-        print(f"[encoder] offset_xy.shape = {offset_xy.shape}")
-
+        print("offset_xy shape:", offset_xy.shape)
+        pixel_size = 1 / torch.tensor((w, h), dtype=torch.float32, device=device)
         xy_ray = xy_ray + (offset_xy - 0.5) * pixel_size
-
-        print(f"[DEBUG] xy_ray min: {xy_ray.min().item():.4f}, max: {xy_ray.max().item():.4f}")
-        print(f"[DEBUG] valid range x: [0, {wb-1}], y: [0, {hb-1}]")
-
-        gpp = self.cfg.gaussians_per_pixel
-        with torch.no_grad():
-            gaussians = self.gaussian_adapter.forward(
-                rearrange(context["extrinsics"], "b v i j -> b v () () () i j"),
-                rearrange(context["intrinsics"], "b v i j -> b v () () () i j"),
-                rearrange(xy_ray, "b v r srf xy -> b v r srf () xy"),
-                depths,
-                self.map_pdf_to_opacity(densities, global_step) / gpp,
-                rearrange(gaussians[..., 2:], "b v r srf c -> b v r srf () c"),
-                (h, w),
-            )
         
-        print(f"[encoder] xy_ray.shape={xy_ray.shape}, "
-        f"offset_xy.shape={offset_xy.shape}, "
-        f"pixel_size.shape={pixel_size.shape}")
+        gpp = self.cfg.gaussians_per_pixel
+        gaussians = self.gaussian_adapter.forward(
+            rearrange(context["extrinsics"], "b v i j -> b v () () () i j"),
+            rearrange(context["intrinsics"], "b v i j -> b v () () () i j"),
+            rearrange(xy_ray, "b v r srf xy -> b v r srf () xy"),
+            depths,
+            self.map_pdf_to_opacity(densities, global_step) / gpp,
+            rearrange(gaussians[..., 2:], "b v r srf c -> b v r srf () c"),
+            (h, w),
+        )
 
         # Dump visualizations if needed.
         if visualization_dump is not None:
-            # 1. 先存实际分辨率
-            visualization_dump["hb"] = hb
-            visualization_dump["wb"] = wb
-            # 2. 再 dump 深度图
             visualization_dump["depth"] = rearrange(
-                depths, "b v (h w) srf s -> b v h w srf s", h=hb, w=wb
+                depths, "b v (h w) srf s -> b v h w srf s", h=h, w=w
             )
             visualization_dump["scales"] = rearrange(
                 gaussians.scales, "b v r srf spp xyz -> b (v r srf spp) xyz"
@@ -259,33 +233,28 @@ class EncoderEpipolar(Encoder[EncoderEpipolarCfg]):
             gaussians.feature_harmonics,
             "b v r srf spp c d_f_sh -> b (v r srf spp) c d_f_sh",
         )
-
         gaussian_features = DiagonalGaussianDistribution(
             **{"params" if self.variational else "mean": gaussian_features},
             dim=-2
         )
         return VariationalGaussians(
-            means=rearrange(
+            rearrange(
                 gaussians.means,
                 "b v r srf spp xyz -> b (v r srf spp) xyz",
             ),
-            covariances=rearrange(
+            rearrange(
                 gaussians.covariances,
                 "b v r srf spp i j -> b (v r srf spp) i j",
             ),
-            opacities=rearrange(
+            rearrange(
                 opacity_multiplier * gaussians.opacities,
                 "b v r srf spp -> b (v r srf spp)",
             ),
-            scales=rearrange(
-                gaussians.scales,
-                "b v r srf spp xyz -> b (v r srf spp) xyz",
-            ),
-            color_harmonics=rearrange(
+            rearrange(
                 gaussians.color_harmonics,
                 "b v r srf spp c d_c_sh -> b (v r srf spp) c d_c_sh",
             ),
-            feature_harmonics=gaussian_features,  
+            gaussian_features,
         )
 
     def get_data_shim(self) -> DataShim:

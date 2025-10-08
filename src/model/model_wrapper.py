@@ -411,267 +411,310 @@ class ModelWrapper(LightningModule):
             deterministic=True
         )
         return gaussians, {}
-
+        
     # ---------------- 训练步 --------------- #
     def training_step(self, batch, batch_idx: int):
-        if self.step_tracker:
-            self.step_tracker.set_step(self.global_step)
-            self.log("step_tracker/step", self.step_tracker.get_step())
+        with torch.autograd.set_detect_anomaly(True):
+            if self.step_tracker:
+                self.step_tracker.set_step(self.global_step)
+                self.log("step_tracker/step", self.step_tracker.get_step())
 
-        opt = self.optimizers()
-        if isinstance(opt, list):
-            g_opt, d_opt = opt
-        else:
-            g_opt = opt
+            opt = self.optimizers()
+            if isinstance(opt, list):
+                g_opt, d_opt = opt
+            else:
+                g_opt = opt
 
-        batch = self.data_shim(batch)
-        v_c = batch["context"]["image"].shape[1]
-        b, v_t = batch["target"]["image"].shape[:2]
-        size = self.get_scaled_size(self.scale_factor, batch["target"]["image"].shape[-2:])
-        is_active_loss = self.get_active_loss_groups()
+            batch = self.data_shim(batch)
+            v_c = batch["context"]["image"].shape[1]
+            b, v_t = batch["target"]["image"].shape[:2]
+            size = self.get_scaled_size(self.scale_factor, batch["target"]["image"].shape[-2:])
+            is_active_loss = self.get_active_loss_groups()
 
-        # ---------- 初始化预测 & GT ----------
-        gaussian_pred = Prediction()
-        context_pred   = Prediction()
-        context_gt     = GroundTruth(batch["context"]["image"])
-        target_autoencoder_pred  = Prediction()
-        target_autoencoder_gt    = GroundTruth(batch["target"]["image"])
-        target_render_latent_pred = Prediction()
-        target_render_latent_gt   = GroundTruth(near=batch["target"]["near"], far=batch["target"]["far"])
-        target_render_image_pred  = Prediction()
-        target_render_image_gt    = GroundTruth(
-            image=self.rescale(batch["target"]["image"], self.scale_factor) if is_active_loss["target_render_image"] else None,
-            near=batch["target"]["near"],
-            far =batch["target"]["far"],
-        )
-        target_combined_pred = Prediction()
-        target_combined_gt   = GroundTruth(batch["target"]["image"],
-                                        near=batch["target"]["near"],
-                                        far =batch["target"]["far"])
-
-        # ---------- 生成器前向 ----------
-        self.toggle_optimizer(g_opt)
-        
-        latents_to_decode = {}
-        context_latents   = None
-
-        # 1) context 编码
-        if is_active_loss["context"] or (self.encode_latents and
-                (is_active_loss["target_render_latent"] or is_active_loss["target_render_image"] or is_active_loss["target_combined"])):
-            context_pred.posterior = self.autoencoder.encode(batch["context"]["image"])
-            context_latents = context_pred.posterior.sample()
-            if is_active_loss["context"]:
-                latents_to_decode["context"] = context_latents
-
-        # 2) target 编码
-        if is_active_loss["target_autoencoder"] or is_active_loss["target_render_latent"]:
-            target_autoencoder_pred.posterior = self.autoencoder.encode(batch["target"]["image"])
-            target_latents = target_autoencoder_pred.posterior.sample()
-            if is_active_loss["target_autoencoder"]:
-                latents_to_decode["target"] = target_latents
-            if is_active_loss["target_render_latent"]:
-                target_render_latent_gt.image = target_latents
-
-        # 3) 高斯编码 + 渲染
-        if any(is_active_loss[k] for k in ("gaussian", "target_render_latent",
-                                        "target_render_image", "target_combined")):
-            gaussians: VariationalGaussians = self.encoder(
-                batch["context"],
-                self.step_tracker.get_step(),
-                features=context_latents if self.encode_latents else None,
-                deterministic=False
+            print(">>> active losses (before override):", is_active_loss)
+            is_active_loss["target_render_image"] = True
+            is_active_loss["target_render_latent"] = True 
+            # ---------- 初始化预测 & GT ----------
+            gaussian_pred = Prediction()
+            context_pred   = Prediction()
+            context_gt     = GroundTruth(batch["context"]["image"])
+            target_autoencoder_pred  = Prediction()
+            target_autoencoder_gt    = GroundTruth(batch["target"]["image"])
+            target_render_latent_pred = Prediction()
+            target_render_latent_gt   = GroundTruth(near=batch["target"]["near"], far=batch["target"]["far"])
+            target_render_image_pred  = Prediction()
+            target_render_image_gt    = GroundTruth(
+                image=self.rescale(batch["target"]["image"], self.scale_factor) if is_active_loss["target_render_image"] else None,
+                near=batch["target"]["near"],
+                far =batch["target"]["far"],
             )
-            if is_active_loss["gaussian"]:
-                gaussian_pred.posterior = gaussians.feature_harmonics
+            print(">>> target_render_image_gt.image is None:", target_render_image_gt.image is None)
+            if target_render_image_gt.image is None:
+                print("[WARNING] target_render_image_gt.image is None")
+            target_combined_pred = Prediction()
+            target_combined_gt   = GroundTruth(batch["target"]["image"],
+                                            near=batch["target"]["near"],
+                                            far =batch["target"]["far"])
 
-            output = self.decoder.forward(
-                gaussians.sample() if self.variational in ("gaussians", "none") else gaussians.flatten(),
-                batch["target"]["extrinsics"],
-                batch["target"]["intrinsics"],
-                batch["target"]["near"],
-                batch["target"]["far"],
-                size,
-                depth_mode=self.train_cfg.depth_mode,
-                return_colors=is_active_loss["target_render_image"],
-                return_features=is_active_loss["target_render_latent"] or is_active_loss["target_combined"],
-            )
+            # ---------- 生成器前向 ----------
+            self.toggle_optimizer(g_opt)
+            
+            latents_to_decode = {}
+            context_latents   = None
 
-            # ✅ 只 detach 你需要的字段（假设是 image 和 color）
-            if hasattr(output, 'image') and output.image is not None:
-                output.image = output.image.detach().requires_grad_()
-            if hasattr(output, 'color') and output.color is not None:
-                output.color = output.color.detach().requires_grad_()
-            if hasattr(output, 'features') and output.features is not None:
-                output.features = output.features.detach().requires_grad_()
+            # 1) context 编码
+            if is_active_loss["context"] or (self.encode_latents and
+                    (is_active_loss["target_render_latent"] or is_active_loss["target_render_image"] or is_active_loss["target_combined"])):
+                context_pred.posterior = self.autoencoder.encode(batch["context"]["image"])
+                context_latents = context_pred.posterior.sample()
+                if is_active_loss["context"]:
+                    latents_to_decode["context"] = context_latents
 
-            target_render_image_pred.image = output.color
-            target_render_latent_pred.posterior = output.feature_posterior
-            latent_sample = output.feature_posterior.sample()
-            z = self.rescale(latent_sample, Fraction(1, self.supersampling_factor))
-            target_render_latent_pred.image = z
+            # 2) target 编码
+            if is_active_loss["target_autoencoder"] or is_active_loss["target_render_latent"]:
+                target_autoencoder_pred.posterior = self.autoencoder.encode(batch["target"]["image"])
+                target_latents = target_autoencoder_pred.posterior.sample()
+                if is_active_loss["target_autoencoder"]:
+                    latents_to_decode["target"] = target_latents
+                if is_active_loss["target_render_latent"]:
+                    target_render_latent_gt.image = target_latents
 
-            if is_active_loss["target_combined"]:
-                skip_z = None
-                if self.autoencoder.expects_skip:
-                    skip_z = torch.cat((output.color.detach(), latent_sample), dim=-3) \
-                        if self.autoencoder.expects_skip_extra else latent_sample
-                target_combined_pred.image = self.autoencoder.decode(z, skip_z)
+            # 3) 高斯编码 + 渲染
+            if any(is_active_loss[k] for k in ("gaussian", "target_render_latent",
+                                            "target_render_image", "target_combined")):
+                gaussians: VariationalGaussians = self.encoder(
+                    batch["context"],
+                    self.step_tracker.get_step(),
+                    features=context_latents if self.encode_latents else None,
+                    deterministic=False
+                )
 
-        # 4) 批量解码 latents
-        if latents_to_decode:
-            split_sizes = [prod(l.shape[:-3]) for l in latents_to_decode.values()]
-            latents = torch.cat([l.flatten(0, -4) for l in latents_to_decode.values()])
-            images = self.autoencoder.decode(latents)
-            pred_images = dict(zip(latents_to_decode.keys(), images.split(split_sizes)))
-            if is_active_loss["context"]:
-                context_pred.image = rearrange(pred_images["context"],
-                                            "(b v) c h w -> b v c h w", b=b, v=v_c)
-            if is_active_loss["target_autoencoder"]:
-                target_autoencoder_pred.image = rearrange(pred_images["target"],
-                                                        "(b v) c h w -> b v c h w", b=b, v=v_t)
 
-        # ---------- 指标日志 ----------
-        for view, pred, gt in zip(
-                ("context", "target_autoencoder", "target_render", "target_combined"),
-                (context_pred, target_autoencoder_pred, target_render_image_pred, target_combined_pred),
-                (context_gt, target_autoencoder_gt, target_render_image_gt, target_combined_gt)):
-            if gt.image is not None and pred.image is not None:
-                psnr = compute_psnr(
-                    rearrange(gt.image, "b v c h w -> (b v) c h w"),
-                    rearrange(pred.image, "b v c h w -> (b v) c h w"))
-                self.log(f"train/{view}/psnr", psnr.mean())
+                print("=== Gaussian Parameters Check ===")
+                print("means  - shape:", gaussians.means.shape)
+                print("means  - nan:", torch.isnan(gaussians.means).any().item())
+                print("means  - inf:", torch.isinf(gaussians.means).any().item())
+                print("means  - min:", gaussians.means.min().item())
+                print("means  - max:", gaussians.means.max().item())
 
-        # ---------- 判别器 logits ----------
-        for loss_group, pred in zip(
-                (self.context_losses, self.target_autoencoder_losses, self.target_combined_losses),
-                (context_pred, target_autoencoder_pred, target_combined_pred)):
-            if loss_group.is_generator_loss_active(self.step_tracker.get_step()):
-                b, v = pred.image.shape[:2]
-                logits_fake = self.discriminator(
-                    rearrange(pred.image, "b v c h w -> (b v) c h w"))
-                pred.logits_fake = rearrange(logits_fake, "(b v) c h w -> b v c h w", b=b, v=v)
+                print("covs   - shape:", gaussians.covariances.shape)
+                print("covs   - nan:", torch.isnan(gaussians.covariances).any().item())
+                print("covs   - inf:", torch.isinf(gaussians.covariances).any().item())
+                print("covs   - min:", gaussians.covariances.min().item())
+                print("covs   - max:", gaussians.covariances.max().item())
 
-        # ---------- 生成器损失 ----------
-        generator_loss = 0.
-        for loss_group, pred, gt in zip(
-                (self.gaussian_losses, self.context_losses, self.target_autoencoder_losses,
-                self.target_render_image_losses, self.target_render_latent_losses, self.target_combined_losses),
-                (gaussian_pred, context_pred, target_autoencoder_pred,
-                target_render_image_pred, target_render_latent_pred, target_combined_pred),
-                (None, context_gt, target_autoencoder_gt,
-                target_render_image_gt, target_render_latent_gt, target_combined_gt)):
-            if loss_group is None:
-                continue
-            group_loss, loss_dict = loss_group.forward_generator(
-                pred, gt, self.step_tracker.get_step(), self.last_layer_weight)
-            for loss_name, loss in loss_dict.items():
-                self.log(f"loss/generator/{loss_name}", loss.unweighted)
-            self.log(f"loss/generator/{loss_group.name}/total", group_loss)
-            generator_loss = generator_loss + group_loss
+                print("opacs  - shape:", gaussians.opacities.shape)
+                print("opacs  - nan:", torch.isnan(gaussians.opacities).any().item())
+                print("opacs  - inf:", torch.isinf(gaussians.opacities).any().item())
+                print("opacs  - min:", gaussians.opacities.min().item())
+                print("opacs  - max:", gaussians.opacities.max().item())
+                print("=================================")
 
-        if self.gaussian_losses is not None:
-            _, gaussian_loss_dict = self.gaussian_losses.forward_generator(
-                gaussian_pred, None, self.step_tracker.get_step(), self.last_layer_weight)
-        else:
-            log("gaussian_losses is None, skipping forward_generator")
+                if is_active_loss["gaussian"]:
+                    gaussian_pred.posterior = gaussians.feature_harmonics
 
-        # ---------- 生成器反向 ----------
-        if isinstance(generator_loss, Tensor) and not generator_loss.isnan().any():
-            g_opt.zero_grad()
-            self.manual_backward(generator_loss)
-            self.clip_gradients(
-                g_opt,
-                gradient_clip_val=self.optimizer_cfg.generator.gradient_clip_val,
-                gradient_clip_algorithm=self.optimizer_cfg.generator.gradient_clip_algorithm)
-            g_opt.step()
-        else:
-            warn(f"NaN generator_loss at step {self.step_tracker.get_step()}")
+                output = self.decoder.forward(
+                    gaussians.sample() if self.variational in ("gaussians", "none") else gaussians.flatten(),
+                    batch["target"]["extrinsics"],
+                    batch["target"]["intrinsics"],
+                    batch["target"]["near"],
+                    batch["target"]["far"],
+                    size,
+                    depth_mode=self.train_cfg.depth_mode,
+                    return_colors=is_active_loss["target_render_image"],
+                    return_features=is_active_loss["target_render_latent"] or is_active_loss["target_combined"],
+                )
 
-        self.untoggle_optimizer(g_opt)
+                print(f"[DEBUG] Decoder output - feature_posterior: {output.feature_posterior}")
+                print(f"[DEBUG] Decoder output - color shape: {output.color.shape if output.color is not None else 'None'}")
+                print(f"[DEBUG] Decoder output - mask shape: {output.mask.shape if output.mask is not None else 'None'}")
+                print(f"[DEBUG] Decoder output - depth shape: {output.depth.shape if output.depth is not None else 'None'}")
 
-        # ---------- 判别器损失 & 反向 ----------
-        if self.discriminator is not None:
-            self.toggle_optimizer(d_opt)
-            discriminator_loss = 0.
-            for loss_group, pred, gt in zip(
+                target_render_image_pred.image = output.color
+                target_render_latent_pred.posterior = output.feature_posterior
+                if output.feature_posterior is not None:
+                    latent_sample = output.feature_posterior.sample()
+                else:
+                    print("[WARNING] feature_posterior is None, creating dummy latent sample")
+                    # 创建虚拟的潜在样本以避免错误 - 使用正确的变量名
+                    batch_size = batch["target"]["image"].shape[0] if batch["target"]["image"] is not None else 1
+                    device = batch["target"]["image"].device if batch["target"]["image"] is not None else self.device
+                    latent_sample = torch.randn(batch_size, 4, 8, 8, device=device)
+
+                z = self.rescale(latent_sample, Fraction(1, self.supersampling_factor))
+                target_render_latent_pred.image = z
+
+                if is_active_loss["target_combined"]:
+                    skip_z = None
+                    if self.autoencoder.expects_skip:
+                        skip_z = torch.cat((output.color.detach(), latent_sample), dim=-3) \
+                            if self.autoencoder.expects_skip_extra else latent_sample
+                    target_combined_pred.image = self.autoencoder.decode(z, skip_z)
+
+            # 4) 批量解码 latents
+            if latents_to_decode:
+                split_sizes = [prod(l.shape[:-3]) for l in latents_to_decode.values()]
+                latents = torch.cat([l.flatten(0, -4) for l in latents_to_decode.values()])
+                images = self.autoencoder.decode(latents)
+                pred_images = dict(zip(latents_to_decode.keys(), images.split(split_sizes)))
+                if is_active_loss["context"]:
+                    context_pred.image = rearrange(pred_images["context"],
+                                                "(b v) c h w -> b v c h w", b=b, v=v_c)
+                if is_active_loss["target_autoencoder"]:
+                    target_autoencoder_pred.image = rearrange(pred_images["target"],
+                                                            "(b v) c h w -> b v c h w", b=b, v=v_t)
+
+            # ---------- 指标日志 ----------
+            for view, pred, gt in zip(
+                    ("context", "target_autoencoder", "target_render", "target_combined"),
+                    (context_pred, target_autoencoder_pred, target_render_image_pred, target_combined_pred),
+                    (context_gt, target_autoencoder_gt, target_render_image_gt, target_combined_gt)):
+                if gt.image is not None and pred.image is not None:
+                    psnr = compute_psnr(
+                        rearrange(gt.image, "b v c h w -> (b v) c h w"),
+                        rearrange(pred.image, "b v c h w -> (b v) c h w"))
+                    self.log(f"train/{view}/psnr", psnr.mean())
+
+            # ---------- 判别器 logits ----------
+            for loss_group, pred in zip(
                     (self.context_losses, self.target_autoencoder_losses, self.target_combined_losses),
-                    (context_pred, target_autoencoder_pred, target_combined_pred),
-                    (context_gt, target_autoencoder_gt, target_combined_gt)):
-                if loss_group.is_discriminator_loss_active(self.step_tracker.get_step()):
+                    (context_pred, target_autoencoder_pred, target_combined_pred)):
+                if loss_group.is_generator_loss_active(self.step_tracker.get_step()):
                     b, v = pred.image.shape[:2]
                     logits_fake = self.discriminator(
-                        rearrange(pred.image.detach(), "b v c h w -> (b v) c h w"))
-                    logits_real = self.discriminator(
-                        rearrange(gt.image, "b v c h w -> (b v) c h w"))
+                        rearrange(pred.image, "b v c h w -> (b v) c h w"))
                     pred.logits_fake = rearrange(logits_fake, "(b v) c h w -> b v c h w", b=b, v=v)
-                    pred.logits_real = rearrange(logits_real, "(b v) c h w -> b v c h w", b=b, v=v)
-                    group_loss, loss_dict = loss_group.forward_discriminator(
-                        pred, gt, self.step_tracker.get_step())
-                    for loss_name, loss in loss_dict.items():
-                        self.log(f"loss/discriminator/{loss_name}", loss.unweighted)
-                    self.log(f"loss/discriminator/{loss_group.name}/total", group_loss)
-                    discriminator_loss = discriminator_loss + group_loss
 
-            self.log("loss/discriminator/total", discriminator_loss)
+            # ---------- 生成器损失 ----------
+            generator_loss = 0.
+            for loss_group, pred, gt in zip(
+                    (self.gaussian_losses, self.context_losses, self.target_autoencoder_losses,
+                    self.target_render_image_losses, self.target_render_latent_losses, self.target_combined_losses),
+                    (gaussian_pred, context_pred, target_autoencoder_pred,
+                    target_render_image_pred, target_render_latent_pred, target_combined_pred),
+                    (None, context_gt, target_autoencoder_gt,
+                    target_render_image_gt, target_render_latent_gt, target_combined_gt)):
+                if loss_group is None:
+                    continue
+                if gt is None:
+                    print(f"[WARNING] GT for {loss_group.name} is None")
+                    continue
+                group_loss, loss_dict = loss_group.forward_generator(
+                    pred, gt, self.step_tracker.get_step(), self.last_layer_weight)
+                for loss_name, loss in loss_dict.items():
+                    self.log(f"loss/generator/{loss_name}", loss.unweighted)
+                self.log(f"loss/generator/{loss_group.name}/total", group_loss)
+                generator_loss = generator_loss + group_loss
 
-            if isinstance(discriminator_loss, Tensor) and not discriminator_loss.isnan().any():
-                d_opt.zero_grad()
-                self.manual_backward(discriminator_loss)
+            if self.gaussian_losses is not None:
+                _, gaussian_loss_dict = self.gaussian_losses.forward_generator(
+                    gaussian_pred, None, self.step_tracker.get_step(), self.last_layer_weight)
+            else:
+                log("gaussian_losses is None, skipping forward_generator")
+
+            # ---------- 生成器反向 ----------
+            if isinstance(generator_loss, Tensor) and not generator_loss.isnan().any():
+                print(f"[DEBUG] Generator loss: {generator_loss.item()}")
+                g_opt.zero_grad()
+                # self.manual_backward(generator_loss)
+                with torch.autograd.set_detect_anomaly(True):
+                    self.manual_backward(generator_loss)
                 self.clip_gradients(
-                    d_opt,
-                    gradient_clip_val=self.optimizer_cfg.discriminator.gradient_clip_val,
-                    gradient_clip_algorithm=self.optimizer_cfg.discriminator.gradient_clip_algorithm)
-                d_opt.step()
+                    g_opt,
+                    gradient_clip_val=self.optimizer_cfg.generator.gradient_clip_val,
+                    gradient_clip_algorithm=self.optimizer_cfg.generator.gradient_clip_algorithm)
+                g_opt.step()
             else:
-                warn(f"NaN discriminator_loss at step {self.step_tracker.get_step()}")
+                warn(f"NaN generator_loss at step {self.step_tracker.get_step()}")
 
-            self.untoggle_optimizer(d_opt)
-        else:
-            discriminator_loss = None
+            self.untoggle_optimizer(g_opt)
 
-        # ---------- 进度 & scheduler ----------
-        if self.global_rank == 0:
-            progress = (f"train step {self.step_tracker.get_step()}; "
-                        f"scene = {batch['scene']}; "
-                        f"context = {batch['context']['index'].tolist()}; "
-                        f"generator loss = {generator_loss:.6f}")
-            if discriminator_loss is not None:
-                progress += f"; discriminator loss = {discriminator_loss:.6f}"
+            # ---------- 判别器损失 & 反向 ----------
+            if self.discriminator is not None:
+                self.toggle_optimizer(d_opt)
+                discriminator_loss = 0.
+                for loss_group, pred, gt in zip(
+                        (self.context_losses, self.target_autoencoder_losses, self.target_combined_losses),
+                        (context_pred, target_autoencoder_pred, target_combined_pred),
+                        (context_gt, target_autoencoder_gt, target_combined_gt)):
+                    if loss_group.is_discriminator_loss_active(self.step_tracker.get_step()):
+                        if gt is None:
+                            print(f"[WARNING] GT for {loss_group.name} is None")
+                            continue
+                        b, v = pred.image.shape[:2]
+                        logits_fake = self.discriminator(
+                            rearrange(pred.image.detach(), "b v c h w -> (b v) c h w"))
+                        logits_real = self.discriminator(
+                            rearrange(gt.image, "b v c h w -> (b v) c h w"))
+                        pred.logits_fake = rearrange(logits_fake, "(b v) c h w -> b v c h w", b=b, v=v)
+                        pred.logits_real = rearrange(logits_real, "(b v) c h w -> b v c h w", b=b, v=v)
+                        group_loss, loss_dict = loss_group.forward_discriminator(
+                            pred, gt, self.step_tracker.get_step())
+                        for loss_name, loss in loss_dict.items():
+                            self.log(f"loss/discriminator/{loss_name}", loss.unweighted)
+                        self.log(f"loss/discriminator/{loss_group.name}/total", group_loss)
+                        discriminator_loss = discriminator_loss + group_loss
 
-        self.log("loss/generator/total", generator_loss, prog_bar=True)
+                self.log("loss/discriminator/total", discriminator_loss)
 
-        schedulers = self.lr_schedulers()
-        if schedulers:
-            if isinstance(schedulers, list):
-                for sch in schedulers:
-                    sch.step()
+                if isinstance(discriminator_loss, Tensor) and not discriminator_loss.isnan().any():
+                    d_opt.zero_grad()
+                    self.manual_backward(discriminator_loss)
+                    self.clip_gradients(
+                        d_opt,
+                        gradient_clip_val=self.optimizer_cfg.discriminator.gradient_clip_val,
+                        gradient_clip_algorithm=self.optimizer_cfg.discriminator.gradient_clip_algorithm)
+                    d_opt.step()
+                else:
+                    warn(f"NaN discriminator_loss at step {self.step_tracker.get_step()}")
+
+                self.untoggle_optimizer(d_opt)
             else:
-                schedulers.step()
+                discriminator_loss = None
 
-    # 粘到 ModelWrapper 类里
-    def build_spiral_camera(self, b, azim_deg, elev_deg=20., dist=2.):
-        """返回虚拟相机外参 tensor [b, 4, 4]"""
-        import math
-        azim = math.radians(azim_deg)
-        elev = math.radians(elev_deg)
-        cam_pos = torch.tensor([dist * math.cos(elev) * math.sin(azim),
-                                dist * math.sin(elev),
-                                dist * math.cos(elev) * math.cos(azim)],
-                              device=self.device)
-        target = torch.zeros(3, device=self.device)
-        up = torch.tensor([0., 1., 0.], device=self.device)
+            # ---------- 进度 & scheduler ----------
+            if self.global_rank == 0:
+                progress = (f"train step {self.step_tracker.get_step()}; "
+                            f"scene = {batch['scene']}; "
+                            f"context = {batch['context']['index'].tolist()}; "
+                            f"generator loss = {generator_loss:.6f}")
+                if discriminator_loss is not None:
+                    progress += f"; discriminator loss = {discriminator_loss:.6f}"
 
-        # look-at
-        z = (cam_pos - target) / torch.norm(cam_pos - target)
-        x = torch.cross(up, z)
-        x /= x.norm()
-        y = torch.cross(z, x)
-        pose = torch.eye(4, device=self.device)
-        pose[:3, 0] = x
-        pose[:3, 1] = y
-        pose[:3, 2] = z
-        pose[:3, 3] = cam_pos
-        return pose.unsqueeze(0).repeat(b, 1, 1)   # [b,4,4]
+            self.log("loss/generator/total", generator_loss, prog_bar=True)
+
+            schedulers = self.lr_schedulers()
+            if schedulers:
+                if isinstance(schedulers, list):
+                    for sch in schedulers:
+                        sch.step()
+                else:
+                    schedulers.step()
+
+        # 粘到 ModelWrapper 类里
+        def build_spiral_camera(self, b, azim_deg, elev_deg=20., dist=2.):
+            """返回虚拟相机外参 tensor [b, 4, 4]"""
+            import math
+            azim = math.radians(azim_deg)
+            elev = math.radians(elev_deg)
+            cam_pos = torch.tensor([dist * math.cos(elev) * math.sin(azim),
+                                    dist * math.sin(elev),
+                                    dist * math.cos(elev) * math.cos(azim)],
+                                device=self.device)
+            target = torch.zeros(3, device=self.device)
+            up = torch.tensor([0., 1., 0.], device=self.device)
+
+            # look-at
+            z = (cam_pos - target) / torch.norm(cam_pos - target)
+            x = torch.cross(up, z)
+            x /= x.norm()
+            y = torch.cross(z, x)
+            pose = torch.eye(4, device=self.device)
+            pose[:3, 0] = x
+            pose[:3, 1] = y
+            pose[:3, 2] = z
+            pose[:3, 3] = cam_pos
+            return pose.unsqueeze(0).repeat(b, 1, 1)   # [b,4,4]
 
     # ---------------- 验证 / 测试 / 视频 --------------- #
     @rank_zero_only
@@ -801,11 +844,13 @@ class ModelWrapper(LightningModule):
             self.render_video_interpolation_exaggerated(batch)
 
     def test_step(self, batch: BatchedExample, batch_idx: int) -> None:
+        print(f">>> 测试步骤开始，batch_idx: {batch_idx}")
+        print(f">>> batch 形状: {batch['target']['image'].shape if 'target' in batch else 'No target'}")
         batch = self.data_shim(batch)
         b, v = batch["target"]["image"].shape[:2]
         size = self.get_scaled_size(1.0, batch["target"]["image"].shape[-2:])
         assert b == 1
-
+        print(f">>> 处理后 batch 形状: {batch['target']['image'].shape}")
         # ---------- 1. 编码 ----------
         if self.encode_latents:
             posterior = self.autoencoder.encode(batch["context"]["image"])
@@ -820,6 +865,7 @@ class ModelWrapper(LightningModule):
             features=context_latents,
             deterministic=False,
         )
+
         output = self.decoder.forward(
             gaussians.sample() if self.variational in ("gaussians", "none") else gaussians.flatten(),
             batch["target"]["extrinsics"],
@@ -827,8 +873,8 @@ class ModelWrapper(LightningModule):
             batch["target"]["near"],
             batch["target"]["far"],
             size,
+            depth_mode=self.train_cfg.depth_mode,
         )
-
         # ---------- 3. 解码 ----------
         latent_sample = output.feature_posterior.sample()
         z = self.rescale(latent_sample, Fraction(1, self.supersampling_factor))

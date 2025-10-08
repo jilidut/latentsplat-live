@@ -45,6 +45,7 @@ class DepthPredictorMonocular(nn.Module):
         Float[Tensor, "batch view ray surface sample"],  # depth
         Float[Tensor, "batch view ray surface sample"],  # pdf
     ]:
+        print("[DepthPredictor] features.shape =", features.shape)
         s = self.num_samples
         # Convert the features into a depth distribution plus intra-bucket offsets.
         features = self.projection(features)

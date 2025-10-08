@@ -1,3 +1,4 @@
+# src/model/decoder/cuda_splatting.py
 from dataclasses import dataclass
 from math import isqrt
 from typing import Literal, Optional, Tuple
@@ -7,6 +8,7 @@ from diff_gaussian_rasterization import (
     GaussianRasterizationSettings,
     GaussianRasterizer,
 )
+
 from einops import einsum, rearrange, repeat
 from jaxtyping import Float
 from torch import Tensor
@@ -143,12 +145,17 @@ def render_cuda(
     all_feature_maps = []
     all_masks = []
     all_depth_maps = []
+
+    # 预生成补零模板（3-D，避免 5-D）
+    zero_feature = None
+    if features is not None:
+        c = features.shape[2]          # 通道数
+        h, w = image_shape
+        with torch.no_grad():
+            zero_feature = torch.zeros((c, h, w), device=device, dtype=torch.float32)
+
     for i in range(b):
-        mean_gradients = torch.zeros_like(gaussian_means[i], requires_grad=True)
-        try:
-            mean_gradients.retain_grad()
-        except Exception:
-            pass
+        means2D = None          # 必须设为 None，避免梯度计数错误
 
         settings = GaussianRasterizationSettings(
             image_height=h,
@@ -168,29 +175,62 @@ def render_cuda(
 
         row, col = torch.triu_indices(3, 3, device=device)
 
-        image, feature_map, mask, depth_map, _ = rasterizer(
+        # 调用 rasterizer
+        result = rasterizer(
             means3D=gaussian_means[i],
-            means2D=mean_gradients,
+            means2D=None,                       # 官方兼容：无 2D 梯度张量
             shs=shs[i] if shs is not None else None,
             colors_precomp=colors_precomp[i] if colors_precomp is not None else None,
             features=features[i] if features is not None else None,
             opacities=gaussian_opacities[i, ..., None],
             cov3D_precomp=gaussian_covariances[i, :, row, col],
         )
-        all_images.append(image)
-        all_feature_maps.append(feature_map)
-        all_masks.append(mask.squeeze(0))
-        all_depth_maps.append(depth_map.squeeze(0))
 
-    all_images = torch.stack(all_images) if all_images[0] is not None else None
-    all_feature_maps = torch.stack(all_feature_maps) if all_feature_maps[0] is not None else None
-    all_masks = torch.stack(all_masks)
+        h_img, w_img = image_shape
+
+        # --- 先解析 result，再处理 mask/depth ---
+        if len(result) == 2:
+            image, mask = result
+            feature_map = None
+            depth_map = None
+        elif len(result) == 5:
+            image, feature_map, mask, depth_map, _ = result
+        else:
+            raise ValueError(f"Unexpected number of return values from rasterizer: {len(result)}")
+
+        # --- 统一 reshape mask ---
+        if mask.ndim == 1:  # [H*W]
+            mask = mask.view(h_img, w_img)
+        elif mask.ndim == 2 and mask.shape[-1] == h_img * w_img:  # [BV, H*W]
+            mask = mask.view(mask.shape[0], h_img, w_img)
+        # 其余情况（已是 3-D）保持原样
+
+        # --- 统一 reshape depth ---
+        if depth_map is not None:
+            if depth_map.ndim == 1:
+                depth_map = depth_map.view(h_img, w_img)
+            elif depth_map.ndim == 2 and depth_map.shape[-1] == h_img * w_img:
+                depth_map = depth_map.view(depth_map.shape[0], h_img, w_img)
+
+        # 直接 append，**不再 unsqueeze**
+        all_masks.append(mask)
+        all_depth_maps.append(
+            depth_map if depth_map is not None
+            else torch.zeros((h_img, w_img), device=image.device)
+        )
+
+    # 组装 4-D 输出
+    all_images   = torch.stack(all_images)   if all_images          else None
+    all_feature_maps = torch.stack(all_feature_maps) if all_feature_maps else None
+    all_masks    = torch.stack(all_masks)
     all_depth_maps = torch.stack(all_depth_maps)
+
+    print('[SHAPE] single feature_map:', all_feature_maps[0].shape if all_feature_maps is not None else 'None')
+    print('[SHAPE] stacked feature:',   all_feature_maps.shape if all_feature_maps is not None else 'None')
+
     return RenderOutput(all_images, all_feature_maps, all_masks, all_depth_maps)
 
-
 DepthRenderingMode = Literal["depth", "disparity", "relative_disparity", "log"]
-
 
 def render_depth_cuda(
     extrinsics: Float[Tensor, "batch 4 4"],
