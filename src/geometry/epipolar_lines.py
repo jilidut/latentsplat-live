@@ -201,11 +201,7 @@ def project_rays(
         )
         projection_at_zero["valid"][mask_depth_zero & ~mask_at_camera] = False
     else:
-        # ---------- 调试打印 ----------
-        print(">>> near.shape:", near.shape)
-        print(">>> frame_intersection_min['t'].shape:", frame_intersection_min["t"].shape)
-        print(">>> near:", near) 
-        
+        # If a far plane is specified, use it instead.
         t_near = near.broadcast_to(frame_intersection_min["t"].shape)
         projection_at_zero = _compute_point_projection(
             origins + near[..., None] * directions,

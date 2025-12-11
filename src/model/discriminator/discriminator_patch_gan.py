@@ -88,9 +88,20 @@ class DiscriminatorPatchGan(Discriminator[DiscriminatorPatchGanCfg]):
         ]
         self.main = nn.Sequential(*layers)
 
+        # if self.cfg.pretrained:
+        #     state_dict = torch.load(os.path.join(PRETRAINED_DISCRIMINATOR_PATH, self.cfg.model + ".pt"), map_location="cpu")
+        #     self.load_state_dict(state_dict)
+
+        #权重加载
         if self.cfg.pretrained:
             state_dict = torch.load(os.path.join(PRETRAINED_DISCRIMINATOR_PATH, self.cfg.model + ".pt"), map_location="cpu")
-            self.load_state_dict(state_dict)
+            
+            # 从完整检查点中提取 state_dict
+            if 'state_dict' in state_dict:
+                state_dict = state_dict['state_dict']
+            
+            # 使用 strict=False 来忽略不匹配的键
+            self.load_state_dict(state_dict, strict=False)
 
     def forward(
         self, 

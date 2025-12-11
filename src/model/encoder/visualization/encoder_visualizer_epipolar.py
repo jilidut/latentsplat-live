@@ -68,13 +68,17 @@ class EncoderVisualizerEpipolar(
         for handle in handles:
             handle.remove()
 
+        # softmax_weights = torch.stack(softmax_weights)
+
         # Generate high-resolution context images that can be drawn on.
         context_images = context["image"]
         _, _, _, h, w = context_images.shape
+
         # 获取实际分辨率
-        hb = visualization_dump.get("hb", h)
-        wb = visualization_dump.get("wb", w)
-        h, w = hb, wb
+        # hb = visualization_dump.get("hb", h)
+        # wb = visualization_dump.get("wb", w)
+        # h, w = hb, wb
+
         length = min(h, w)
         min_resolution = self.cfg.min_resolution
         scale_multiplier = (min_resolution + length - 1) // length

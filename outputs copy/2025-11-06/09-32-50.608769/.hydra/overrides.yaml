@@ -1,0 +1,2 @@
+- +experiment=re10k
+- model.discriminator=null

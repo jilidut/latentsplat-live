@@ -1,7 +1,4 @@
-# src/mode/model_wrapper.py
-from __future__ import annotations
-
-import time
+#src/model/model_wrapper.py
 from dataclasses import dataclass
 from fractions import Fraction
 from itertools import chain
@@ -9,10 +6,18 @@ from math import prod
 from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, Literal, Optional, Protocol, runtime_checkable, Tuple
 from warnings import warn
-
+      
+import hydra
+from pathlib import Path
 import moviepy.editor as mpy
+from omegaconf import OmegaConf
 import torch
+import torch.nn.functional as F
 import wandb
+import dataclasses 
+import torchvision
+import numpy as np
+
 from einops import pack, rearrange, repeat
 from jaxtyping import Float
 from pytorch_lightning import LightningModule
@@ -33,8 +38,14 @@ from ..misc.image_io import prep_image, save_image
 from ..misc.LocalLogger import LOG_PATH, LocalLogger
 from ..misc.step_tracker import StepTracker
 from ..visualization.annotation import add_label
-from ..visualization.camera_trajectory.interpolation import interpolate_extrinsics, interpolate_intrinsics
-from ..visualization.camera_trajectory.wobble import generate_wobble, generate_wobble_transformation
+from ..visualization.camera_trajectory.interpolation import (
+    interpolate_extrinsics,
+    interpolate_intrinsics,
+)
+from ..visualization.camera_trajectory.wobble import (
+    generate_wobble,
+    generate_wobble_transformation,
+)
 from ..visualization.color_map import apply_depth_color_map
 from ..visualization.layout import add_border, hcat, vcat
 from ..visualization.validation_in_3d import render_cameras, render_projections
@@ -45,23 +56,23 @@ from .encoder import Encoder
 from .encoder.visualization.encoder_visualizer import EncoderVisualizer
 from .types import Prediction, GroundTruth, VariationalGaussians, VariationalMode
 
-
-# ------------------------------------------------------------------ #
-#                          调试开关                                   #
-# ------------------------------------------------------------------ #
-DEBUG = False
-
-def log(msg: str) -> None:
-    if DEBUG:
-        print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
-
-# ------------------------------------------------------------------ #
-#                          配置结构体                                 #
-# ------------------------------------------------------------------ #
 @dataclass
 class LRSchedulerCfg:
+    # Assumes every step as frequency
     name: str
     kwargs: Dict[str, Any] | None = None
+
+
+def freeze(m: Module) -> None:
+    for param in m.parameters():
+        param.requires_grad = False
+    m.eval()
+
+
+def unfreeze(m: Module) -> None:
+    for param in m.parameters():
+        param.requires_grad = True
+    m.train()
 
 
 @dataclass
@@ -69,8 +80,7 @@ class FreezeCfg:
     autoencoder: bool = False
     encoder: bool = False
     decoder: bool = False
-    # discrimininator: bool = False
-    discriminator: bool = False 
+    discrimininator: bool = False
 
 
 @dataclass
@@ -83,9 +93,8 @@ class GeneratorOptimizerCfg:
     autoencoder_kwargs: Dict[str, Any] | None = None
     kwargs: Dict[str, Any] | None = None
     scheduler: LRSchedulerCfg | None = None
-    gradient_clip_val: float | int | None = None
+    gradient_clip_val: float | int | None = None 
     gradient_clip_algorithm: Literal["value", "norm"] = "norm"
-
 
 @dataclass
 class DiscriminatorOptimizerCfg:
@@ -94,22 +103,17 @@ class DiscriminatorOptimizerCfg:
     scale_lr: bool
     kwargs: Dict[str, Any] | None = None
     scheduler: LRSchedulerCfg | None = None
-    gradient_clip_val: float | int | None = None
+    gradient_clip_val: float | int | None = None 
     gradient_clip_algorithm: Literal["value", "norm"] = "norm"
-
 
 @dataclass
 class OptimizerCfg:
     generator: GeneratorOptimizerCfg
     discriminator: DiscriminatorOptimizerCfg | None = None
 
-
 @dataclass
 class TestCfg:
     output_path: Path
-    decode_tile: int = 64
-    num_rays: int = 64
-    num_points_per_ray: int = 64
 
 
 @dataclass
@@ -121,45 +125,28 @@ class TrainCfg:
     video_wobble: bool = False
 
 
-# ------------------------------------------------------------------ #
-#                          工具函数                                   #
-# ------------------------------------------------------------------ #
-def freeze(m: Module) -> None:
-    m.eval()
-    for p in m.parameters():
-        p.requires_grad = False
-
-
-def unfreeze(m: Module) -> None:
-    m.train()
-    for p in m.parameters():
-        p.requires_grad = True
-
-
 @runtime_checkable
 class TrajectoryFn(Protocol):
-    def __call__(self, t: Float[Tensor, " t"]) -> tuple[
+    def __call__(
+        self,
+        t: Float[Tensor, " t"],
+    ) -> tuple[
         Float[Tensor, "batch view 4 4"],  # extrinsics
         Float[Tensor, "batch view 3 3"],  # intrinsics
     ]:
-        ...
-# ------------------------------------------------------------------ #
-#                      Lightning 封装                                 #
-# ------------------------------------------------------------------ #
+        pass
+
+
 class ModelWrapper(LightningModule):
-    context_loss_cfg: LossGroupCfg | None = None,
-    target_autoencoder_loss_cfg: LossGroupCfg | None = None,
-    target_render_latent_loss_cfg: LossGroupCfg | None = None,
-    target_render_image_loss_cfg: LossGroupCfg | None = None,
-    target_combined_loss_cfg: LossGroupCfg | None = None,
     logger: Optional[WandbLogger]
     autoencoder: Autoencoder
     encoder: Encoder
     encode_latents: bool
     encoder_visualizer: Optional[EncoderVisualizer]
     decoder: Decoder
+    supersampling_factor: int
     discriminator: Discriminator | None
-    gaussian_losses: LossGroup | None
+    gaussian_losses: LossGroup
     context_losses: LossGroup
     target_autoencoder_losses: LossGroup
     target_render_latent_losses: LossGroup
@@ -170,10 +157,16 @@ class ModelWrapper(LightningModule):
     train_cfg: TrainCfg
     freeze_cfg: FreezeCfg
     step_tracker: StepTracker | None
+    # 新增 GSU 损失属性
+    gsu_cfg: Dict[str, Any] | None
+    geom_sem_loss: Module | None
+    unc_sem_loss: Module | None
+    unc_sem_loss_weight: float 
+    # 新增
+
 
     def __init__(
         self,
-        cfg: Any,
         optimizer_cfg: OptimizerCfg,
         test_cfg: TestCfg,
         train_cfg: TrainCfg,
@@ -186,37 +179,39 @@ class ModelWrapper(LightningModule):
         supersampling_factor: int = 1,
         variational: VariationalMode = "none",
         discriminator: Discriminator | None = None,
+        gaussian_loss_cfg: LossGroupCfg | None = None,
         context_loss_cfg: LossGroupCfg | None = None,
         target_autoencoder_loss_cfg: LossGroupCfg | None = None,
         target_render_latent_loss_cfg: LossGroupCfg | None = None,
-        target_combined_loss_cfg: LossGroupCfg | None = None,   # ← 补上
         target_render_image_loss_cfg: LossGroupCfg | None = None,
+        target_combined_loss_cfg: LossGroupCfg | None = None,
         step_tracker: StepTracker | None = None,
+        #新增
+        target_render_image_gsu_loss_cfg: LossGroupCfg | None = None
     ) -> None:
-
         super().__init__()
-        self.cfg = cfg 
         self.automatic_optimization = False
-        log("[ModelWrapper] __init__ called")
+        # self.strict_loading = False
+
         self.optimizer_cfg = optimizer_cfg
+
         self.test_cfg = test_cfg
         self.train_cfg = train_cfg
         self.freeze_cfg = freeze_cfg
         self.step_tracker = step_tracker
+
         self.supersampling_factor = supersampling_factor
         self.variational = variational
 
-        if target_render_image_loss_cfg is None:
-            target_render_image_loss_cfg = (
-                cfg.loss.target.render.image
-                if (hasattr(cfg, "loss") and
-                    hasattr(cfg.loss, "target") and
-                    hasattr(cfg.loss.target, "render") and
-                    hasattr(cfg.loss.target.render, "image"))
-                else None
-            )
+        #新增
+        gsu_cfg = getattr(target_render_image_gsu_loss_cfg, "gsu", None)
+        self.gsu_cfg = gsu_cfg if gsu_cfg else None
 
-        # --- 模型 ---
+        self.geom_sem_loss = None
+        self.unc_sem_loss = None
+        #新增
+
+        # Set up the model.
         self.autoencoder = autoencoder
         self.encoder = encoder
         self.encode_latents = encode_latents
@@ -225,67 +220,67 @@ class ModelWrapper(LightningModule):
         self.decoder = decoder
         self.discriminator = discriminator
 
-        # --- 损失 ---
-        gaussian_loss_cfg = cfg.loss.gaussian
-        log(f"[ModelWrapper] gaussian_loss_cfg = {gaussian_loss_cfg}")
-        if gaussian_loss_cfg is not None:
-            self.gaussian_losses = get_loss_group("gaussian", gaussian_loss_cfg)
-            log(f"[ModelWrapper] gaussian_losses = {self.gaussian_losses}")
-        else:
-            log("[ModelWrapper] gaussian_loss_cfg is None")
-            self.gaussian_losses = None
-
-
-        # 补上这五行
+        self.gaussian_losses = get_loss_group("gaussian", gaussian_loss_cfg)
         self.context_losses = get_loss_group("context", context_loss_cfg)
-        self.target_autoencoder_losses = get_loss_group("target/autoencoder", target_autoencoder_loss_cfg)
+        self.target_autoencoder_losses = get_loss_group("target/autoencoder/loss", target_autoencoder_loss_cfg)
         self.target_render_latent_losses = get_loss_group("target/render/latent", target_render_latent_loss_cfg)
         self.target_render_image_losses = get_loss_group("target/render/image", target_render_image_loss_cfg)
         self.target_combined_losses = get_loss_group("target/combined", target_combined_loss_cfg)
+        #新增
+        self.target_render_image_gsu_losses = get_loss_group("target/render/image/gsu", target_render_image_gsu_loss_cfg)
+        self.use_gsu = (
+            self.gsu_cfg and
+            (self.gsu_cfg.get("geom_sem_contrast", {}).get("enabled", False) or
+            self.gsu_cfg.get("unc_sem_couple", {}).get("enabled", False))
+        )
+        self.use_geo_sem_contrast = self.use_gsu and self.gsu_cfg.get("geom_sem_contrast", {}).get("enabled", False)
+        self.use_uncert_sem_coupling = self.use_gsu and self.gsu_cfg.get("unc_sem_couple", {}).get("enabled", False)
+        #新增
 
-        # --- 梯度 / 冻结 ---
+        assert not self.target_render_latent_losses.has_generator_loss and not self.target_render_latent_losses.has_discriminator_loss, \
+            "Cannot apply GAN losses in latent space"
+        assert not self.target_render_image_losses.has_generator_loss and not self.target_render_image_losses.has_discriminator_loss, \
+            "Cannot apply GAN losses on low resolution RGB space"
+        
+        if any(loss_group.has_generator_loss or loss_group.has_discriminator_loss \
+               for loss_group in [self.context_losses, self.target_autoencoder_losses, self.target_combined_losses]):
+            assert self.discriminator is not None, "Found GAN loss but no discriminator!"
+            assert self.optimizer_cfg.discriminator is not None, "Found GAN loss but no discriminator optimizer config!"
+            
+        # Optionally freeze components
         if self.freeze_cfg.autoencoder:
             freeze(self.autoencoder)
         if self.freeze_cfg.encoder:
             freeze(self.encoder)
         if self.freeze_cfg.decoder:
             freeze(self.decoder)
-        if self.freeze_cfg.discriminator:            
+        if self.freeze_cfg.discrimininator:
             freeze(self.discriminator)
 
+        # This is used for testing.
         self.benchmarker = Benchmarker()
 
-        #  缓存学习率，供 configure_optimizers 使用
-        self.generator_lr: float = 0.0
-        self.autoencoder_lr: float = 0.0
-        self.discriminator_lr: float = 0.0
-        self._scale_factor = 1.0
-    
-    def load_state_dict(self, state_dict, strict=True):
-        # 强制 non-strict，容忍旧 checkpoint 缺少任何键
-        super().load_state_dict(state_dict, strict=False)
+        # 新增--------------------------------------------------------------------
+        if self.gsu_cfg:
+            geom_cfg = self.gsu_cfg.get("geom_sem_contrast", {})
+            if geom_cfg.get("enabled", False):   
+                from ..loss.geom_sem_contrast import GeomSemContrastLoss, LossGeomSemContrastCfg
+                self.geom_sem_loss_weight = geom_cfg.get("weight")
+                geom_cfg_clean = {k: v for k, v in geom_cfg.items() if k not in ("enabled", "weight")}
+                self.geom_sem_loss = GeomSemContrastLoss(LossGeomSemContrastCfg(**geom_cfg_clean))
+            else:
+                self.geom_sem_loss_weight = None
 
-    def rescale(self, image: torch.Tensor, scale_factor: float) -> torch.Tensor:
-        """Simple rescale by factor."""
-        if scale_factor == 1.0:
-            return image
+            unc_cfg = self.gsu_cfg.get("unc_sem_couple", {})
+            if unc_cfg.get("enabled", False):   
+                from ..loss.unc_sem_couple import UncSemCoupleLoss
+                self.unc_sem_loss_weight = unc_cfg.get("weight")
+                unc_cfg_clean = {k: v for k, v in unc_cfg.items() if k in ("reduction",)}
+                self.unc_sem_loss = UncSemCoupleLoss(**unc_cfg_clean)
+            else:
+                self.unc_sem_loss_weight = None
+        # 新增-------------------------------------------------------
 
-        *leading_dims, c, h, w = image.shape
-        new_h, new_w = int(h * scale_factor), int(w * scale_factor)
-
-        # 压成 4D
-        image_4d = image.view(-1, c, h, w)
-
-        # 插值
-        image_4d = torch.nn.functional.interpolate(
-            image_4d, size=(new_h, new_w), mode="bilinear", align_corners=False
-        )
-
-        # 还原成原维度
-        return image_4d.view(*leading_dims, c, new_h, new_w)
-
-
-    # ---------------- 属性 ---------------- #
     @property
     def scale_factor(self) -> Fraction:
         return Fraction(self.supersampling_factor, self.autoencoder.downscale_factor)
@@ -295,430 +290,439 @@ class ModelWrapper(LightningModule):
         res = self.autoencoder.last_layer_weights
         if res is None:
             res = self.decoder.last_layer_weights
-        if res is None:
-            res = self.encoder.last_layer_weights
-        if res is None:
-            raise RuntimeError("No last_layer_weights found in autoencoder/decoder/encoder")
+            if res is None:
+                res = self.encoder.last_layer_weights
+                if res is None:
+                    raise ValueError("Could not find last layer weights in autoencoder, decoder, or encoder")
         return res
-    
+
     @staticmethod
     def get_scaled_size(scale: Fraction, size: Iterable[int]) -> Tuple[int, ...]:
-        return tuple(round(scale * s) for s in size)
+        return tuple(get_integer(scale * s) for s in size)
 
-    def get_active_loss_groups(self) -> Dict[str, bool]:
-        step = self.step_tracker.get_step() if self.step_tracker else 0
-        return {
-            "gaussian": self.gaussian_losses.is_active(step) if self.gaussian_losses else False,
-            "context": self.context_losses.is_active(step),
-            "target_autoencoder": self.target_autoencoder_losses.is_active(step),
-            "target_render_latent": self.target_render_latent_losses.is_active(step),
-            "target_render_image": self.target_render_image_losses.is_active(step),
-            "target_combined": self.target_combined_losses.is_active(step),
-        }
-    
-    # ---------------- 优化器 --------------- #
-    @staticmethod
-    def get_optimizer(
-        optimizer_cfg: GeneratorOptimizerCfg | DiscriminatorOptimizerCfg,
-        params: Iterator[Parameter] | list[Dict[str, Any]],
-        lr: float,
-    ) -> optim.Optimizer:
-        return getattr(optim, optimizer_cfg.name)(
-            params,
-            lr=lr,
-            **(optimizer_cfg.kwargs or {}),
-        )
-
-    @staticmethod
-    def get_lr_scheduler(
-        opt: optim.Optimizer,
-        lr_scheduler_cfg: LRSchedulerCfg,
-    ) -> optim.lr_scheduler.LRScheduler:
-        return getattr(optim.lr_scheduler, lr_scheduler_cfg.name)(
-            opt,
-            **(lr_scheduler_cfg.kwargs or {}),
-        )
-
-    def configure_optimizers(self):
-    # 现场计算 effective batch size
-        eff_bs = (
-            getattr(self.trainer, "num_devices", 1)
-            * getattr(self.trainer, "num_nodes", 1)
-            * self.trainer.datamodule.data_loader_cfg.train.batch_size
-        )
-
-        gen_lr = (
-            eff_bs * self.optimizer_cfg.generator.lr
-            if self.optimizer_cfg.generator.scale_lr
-            else self.optimizer_cfg.generator.lr
-        )
-        auto_lr = (
-            eff_bs * self.optimizer_cfg.generator.autoencoder_lr
-            if self.optimizer_cfg.generator.scale_autoencoder_lr
-            else self.optimizer_cfg.generator.autoencoder_lr
-        )
-
-        # 把计算值写回实例属性
-        self.generator_lr = gen_lr
-        self.autoencoder_lr = auto_lr
-
-        optimizers = []
-        schedulers = []
-
-        # Generator optimizer
-        g_opt = self.get_optimizer(
-            self.optimizer_cfg.generator,
-            [
-                {"params": chain(self.encoder.parameters(), self.decoder.parameters())},
-                {"params": self.autoencoder.parameters(), "lr": auto_lr}
-                | (self.optimizer_cfg.generator.autoencoder_kwargs or {}),
-            ],
-            gen_lr,
-        )
-        optimizers.append(g_opt)
-        if self.optimizer_cfg.generator.scheduler:
-            schedulers.append(self.get_lr_scheduler(g_opt, self.optimizer_cfg.generator.scheduler))
-
-        # Discriminator optimizer
-        if self.discriminator:
-            disc_lr = (
-                eff_bs * self.optimizer_cfg.discriminator.lr
-                if self.optimizer_cfg.discriminator.scale_lr
-                else self.optimizer_cfg.discriminator.lr
-            )
-            self.discriminator_lr = disc_lr
-            d_opt = self.get_optimizer(
-                self.optimizer_cfg.discriminator,
-                self.discriminator.parameters(),
-                disc_lr,
-            )
-            optimizers.append(d_opt)
-            if self.optimizer_cfg.discriminator.scheduler:
-                schedulers.append(self.get_lr_scheduler(d_opt, self.optimizer_cfg.discriminator.scheduler))
-
-        return optimizers, schedulers
-
-    def forward(self, batch):
-        context = batch["context"]
-        features = None
-        if self.encode_latents:
-            posterior = self.autoencoder.encode(context["image"])
-            features = posterior.sample()
-        gaussians = self.encoder(
-            context,
-            self.step_tracker.get_step() if self.step_tracker else 0,
-            features=features,
-            deterministic=True
-        )
-        return gaussians, {}
-        
-    # ---------------- 训练步 --------------- #
-    def training_step(self, batch, batch_idx: int):
-        with torch.autograd.set_detect_anomaly(True):
-            if self.step_tracker:
-                self.step_tracker.set_step(self.global_step)
-                self.log("step_tracker/step", self.step_tracker.get_step())
-
-            opt = self.optimizers()
-            if isinstance(opt, list):
-                g_opt, d_opt = opt
-            else:
-                g_opt = opt
-
-            batch = self.data_shim(batch)
-            v_c = batch["context"]["image"].shape[1]
-            b, v_t = batch["target"]["image"].shape[:2]
-            size = self.get_scaled_size(self.scale_factor, batch["target"]["image"].shape[-2:])
-            is_active_loss = self.get_active_loss_groups()
-
-            print(">>> active losses (before override):", is_active_loss)
-            is_active_loss["target_render_image"] = True
-            is_active_loss["target_render_latent"] = True 
-            # ---------- 初始化预测 & GT ----------
-            gaussian_pred = Prediction()
-            context_pred   = Prediction()
-            context_gt     = GroundTruth(batch["context"]["image"])
-            target_autoencoder_pred  = Prediction()
-            target_autoencoder_gt    = GroundTruth(batch["target"]["image"])
-            target_render_latent_pred = Prediction()
-            target_render_latent_gt   = GroundTruth(near=batch["target"]["near"], far=batch["target"]["far"])
-            target_render_image_pred  = Prediction()
-            target_render_image_gt    = GroundTruth(
-                image=self.rescale(batch["target"]["image"], self.scale_factor) if is_active_loss["target_render_image"] else None,
-                near=batch["target"]["near"],
-                far =batch["target"]["far"],
-            )
-            print(">>> target_render_image_gt.image is None:", target_render_image_gt.image is None)
-            if target_render_image_gt.image is None:
-                print("[WARNING] target_render_image_gt.image is None")
-            target_combined_pred = Prediction()
-            target_combined_gt   = GroundTruth(batch["target"]["image"],
-                                            near=batch["target"]["near"],
-                                            far =batch["target"]["far"])
-
-            # ---------- 生成器前向 ----------
-            self.toggle_optimizer(g_opt)
+    def setup(self, stage: str) -> None:
+        # Scale base learning rates to effective batch size
+        if stage == "fit":
+            assert self.trainer.accumulate_grad_batches == 1, "Gradient accumulation currently not supported because of manual optimization!"
+            # assumes one fixed batch_size for all train dataloaders!
+            effective_batch_size = self.trainer.accumulate_grad_batches \
+                * self.trainer.num_devices \
+                * self.trainer.num_nodes \
+                * self.trainer.datamodule.data_loader_cfg.train.batch_size
             
-            latents_to_decode = {}
-            context_latents   = None
+            self.generator_lr = effective_batch_size * self.optimizer_cfg.generator.lr \
+                if self.optimizer_cfg.generator.scale_lr else self.optimizer_cfg.generator.lr
+            self.autoencoder_lr = effective_batch_size * self.optimizer_cfg.generator.autoencoder_lr \
+                if self.optimizer_cfg.generator.scale_autoencoder_lr else self.optimizer_cfg.generator.autoencoder_lr
+            if self.optimizer_cfg.discriminator is not None:
+                self.discriminator_lr = effective_batch_size * self.optimizer_cfg.discriminator.lr \
+                    if self.optimizer_cfg.discriminator.scale_lr else self.optimizer_cfg.discriminator.lr
+        return super().setup(stage)
 
-            # 1) context 编码
-            if is_active_loss["context"] or (self.encode_latents and
-                    (is_active_loss["target_render_latent"] or is_active_loss["target_render_image"] or is_active_loss["target_combined"])):
-                context_pred.posterior = self.autoencoder.encode(batch["context"]["image"])
-                context_latents = context_pred.posterior.sample()
-                if is_active_loss["context"]:
-                    latents_to_decode["context"] = context_latents
+    @staticmethod
+    def rescale(
+        x: Float[Tensor, "... height width"], 
+        scale_factor: Fraction
+    ) -> Float[Tensor, "... downscaled_height downscaled_width"]:
+        batch_dims = x.shape[:-2]
+        spatial = x.shape[-2:]
+        size = ModelWrapper.get_scaled_size(scale_factor, spatial)
+        return resize(x.view(-1, *spatial), size=size, antialias=True).view(*batch_dims, *size)
 
-            # 2) target 编码
-            if is_active_loss["target_autoencoder"] or is_active_loss["target_render_latent"]:
-                target_autoencoder_pred.posterior = self.autoencoder.encode(batch["target"]["image"])
-                target_latents = target_autoencoder_pred.posterior.sample()
-                if is_active_loss["target_autoencoder"]:
-                    latents_to_decode["target"] = target_latents
-                if is_active_loss["target_render_latent"]:
-                    target_render_latent_gt.image = target_latents
+    def get_active_loss_groups(self):
+        return {
+            "gaussian": self.gaussian_losses.is_active(self.step_tracker.get_step()),
+            "context": self.context_losses.is_active(self.step_tracker.get_step()),
+            "target_autoencoder": self.target_autoencoder_losses.is_active(self.step_tracker.get_step()),
+            "target_render_latent": self.target_render_latent_losses.is_active(self.step_tracker.get_step()),
+            "target_render_image": self.target_render_image_losses.is_active(self.step_tracker.get_step()),
+            "target_combined": self.target_combined_losses.is_active(self.step_tracker.get_step()),
+            # 新增 通过 get_active_loss_groups 管理 GSU 开关
+            "target_render_image_gsu": self.target_render_image_gsu_losses.is_active(self.step_tracker.get_step()),
+            # 新增 
+        }
 
-            # 3) 高斯编码 + 渲染
-            if any(is_active_loss[k] for k in ("gaussian", "target_render_latent",
-                                            "target_render_image", "target_combined")):
-                gaussians: VariationalGaussians = self.encoder(
-                    batch["context"],
-                    self.step_tracker.get_step(),
-                    features=context_latents if self.encode_latents else None,
-                    deterministic=False
-                )
+    def training_step(self, batch, batch_idx):
+        # Tell the data loader processes about the current step.
+        if self.step_tracker is not None:
+            self.step_tracker.set_step(self.global_step)
+            self.log(f"step_tracker/step", self.step_tracker.get_step())
 
+        # Get optimizers
+        opt = self.optimizers()
+        if isinstance(opt, list):
+            g_opt, d_opt = opt
+            # Do not increment global step for discriminator step
+            d_opt._on_before_step = lambda : self.trainer.profiler.start("optimizer_step")
+            d_opt._on_after_step = lambda : self.trainer.profiler.stop("optimizer_step")
+        else:
+            g_opt = opt
 
-                print("=== Gaussian Parameters Check ===")
-                print("means  - shape:", gaussians.means.shape)
-                print("means  - nan:", torch.isnan(gaussians.means).any().item())
-                print("means  - inf:", torch.isinf(gaussians.means).any().item())
-                print("means  - min:", gaussians.means.min().item())
-                print("means  - max:", gaussians.means.max().item())
+        # Data shim, shape...
+        batch: BatchedExample = self.data_shim(batch)
+        v_c = batch["context"]["image"].shape[1]
+        b, v_t = batch["target"]["image"].shape[:2]
+        size = self.get_scaled_size(self.scale_factor, batch["target"]["image"].shape[-2:])
 
-                print("covs   - shape:", gaussians.covariances.shape)
-                print("covs   - nan:", torch.isnan(gaussians.covariances).any().item())
-                print("covs   - inf:", torch.isinf(gaussians.covariances).any().item())
-                print("covs   - min:", gaussians.covariances.min().item())
-                print("covs   - max:", gaussians.covariances.max().item())
+        # Find out active losses
+        is_active_loss = self.get_active_loss_groups()
 
-                print("opacs  - shape:", gaussians.opacities.shape)
-                print("opacs  - nan:", torch.isnan(gaussians.opacities).any().item())
-                print("opacs  - inf:", torch.isinf(gaussians.opacities).any().item())
-                print("opacs  - min:", gaussians.opacities.min().item())
-                print("opacs  - max:", gaussians.opacities.max().item())
-                print("=================================")
+        # Prepare predictions and ground truth
+        gaussian_pred = Prediction()
+        context_pred = Prediction()
+        context_gt = GroundTruth(batch["context"]["image"])
+        target_autoencoder_pred = Prediction()
+        target_autoencoder_gt = GroundTruth(batch["target"]["image"])
+        target_render_latent_pred = Prediction()
+        target_render_latent_gt = GroundTruth(near=batch["target"]["near"], far=batch["target"]["far"])
+        target_render_image_pred = Prediction()
+        target_render_image_gt = GroundTruth(
+            image=self.rescale(batch["target"]["image"], self.scale_factor) if is_active_loss["target_render_image"] else None,
+            near=batch["target"]["near"], 
+            far=batch["target"]["far"]
+        )
+        target_combined_pred = Prediction()
+        target_combined_gt = GroundTruth(batch["target"]["image"], near=batch["target"]["near"], far=batch["target"]["far"])
 
-                if is_active_loss["gaussian"]:
-                    gaussian_pred.posterior = gaussians.feature_harmonics
+        # Run the model.
+        # First generator pass
+        self.toggle_optimizer(g_opt)
 
-                output = self.decoder.forward(
-                    gaussians.sample() if self.variational in ("gaussians", "none") else gaussians.flatten(),
-                    batch["target"]["extrinsics"],
-                    batch["target"]["intrinsics"],
-                    batch["target"]["near"],
-                    batch["target"]["far"],
-                    size,
-                    depth_mode=self.train_cfg.depth_mode,
-                    return_colors=is_active_loss["target_render_image"],
-                    return_features=is_active_loss["target_render_latent"] or is_active_loss["target_combined"],
-                )
+        # Apply Autoencoder encoder to ...
+        # ... context views
+        latents_to_decode = {}
+        if is_active_loss["context"] or \
+            (self.encode_latents and \
+                (is_active_loss["target_render_latent"] or is_active_loss["target_render_image"] or is_active_loss["target_combined"])):
+            context_pred.posterior = self.autoencoder.encode(batch["context"]["image"])
+            context_latents = context_pred.posterior.sample()
+            if is_active_loss["context"]:
+                latents_to_decode["context"] = context_latents
 
-                print(f"[DEBUG] Decoder output - feature_posterior: {output.feature_posterior}")
-                print(f"[DEBUG] Decoder output - color shape: {output.color.shape if output.color is not None else 'None'}")
-                print(f"[DEBUG] Decoder output - mask shape: {output.mask.shape if output.mask is not None else 'None'}")
-                print(f"[DEBUG] Decoder output - depth shape: {output.depth.shape if output.depth is not None else 'None'}")
+        # ... target views
+        if is_active_loss["target_autoencoder"] or is_active_loss["target_render_latent"]:
+            target_autoencoder_pred.posterior = self.autoencoder.encode(batch["target"]["image"])
+            target_latents = target_autoencoder_pred.posterior.sample()
+            if is_active_loss["target_autoencoder"]:
+                latents_to_decode["target"] = target_latents
+            if is_active_loss["target_render_latent"]:
+                target_render_latent_gt.image = target_latents
+        
+        if is_active_loss["gaussian"] or is_active_loss["target_render_latent"] or is_active_loss["target_render_image"] or is_active_loss["target_combined"]:
+            gaussians: VariationalGaussians = self.encoder(
+                batch["context"], 
+                self.step_tracker.get_step(),
+                features=context_latents if self.encode_latents else None,
+                deterministic=False
+            )
+            if is_active_loss["gaussian"]:
+                gaussian_pred.posterior = gaussians.feature_harmonics
+            output = self.decoder.forward(
+                gaussians.sample() if self.variational in ("gaussians", "none") else gaussians.flatten(),     # Sample from variational Gaussians
+                batch["target"]["extrinsics"],
+                batch["target"]["intrinsics"],
+                batch["target"]["near"],
+                batch["target"]["far"],
+                size,
+                depth_mode=self.train_cfg.depth_mode,
+                return_colors=is_active_loss["target_render_image"],
+                return_features=is_active_loss["target_render_latent"] or is_active_loss["target_combined"]
+            )
+            target_render_image_pred.image = output.color
+            target_render_latent_pred.posterior = output.feature_posterior
+            # latent_sample = output.feature_posterior.sample()
+            # # Invert supersampling
+            # z = self.rescale(latent_sample, Fraction(1, self.supersampling_factor))
+            # target_render_latent_pred.image = z   # TODO use kl divergence between latents instead of image loss between samples?
 
-                target_render_image_pred.image = output.color
-                target_render_latent_pred.posterior = output.feature_posterior
-                if output.feature_posterior is not None:
-                    latent_sample = output.feature_posterior.sample()
+            # 新增----------------------------------------------------------------------
+            # A. 健壮获取 latent_sample（兼容 VAE / GSU）
+            latent_sample = None
+
+            # ---- 1. VAE 后验路径 ----
+            if output.feature_posterior is not None:
+                latent_sample = output.feature_posterior.sample()   # [B,C,H,W]
+                
+                # 变成 [B,1,C,H,W] → [B*1, C, H, W]
+                latent_sample = latent_sample.unsqueeze(1)
+                latent_sample = rearrange(latent_sample, "b v c h w -> (b v) c h w")
+
+            # ---- 2. GSU 高斯 latent 路径 ----
+            elif getattr(output, "gaussian_latent", None) is not None:
+                latent_sample = output.gaussian_latent              # [B,V,C,H,W]
+                latent_sample = rearrange(latent_sample, "b v c h w -> (b v) c h w")
+
+            # ---- 3. Supersampling 反向还原 ----
+            z = None
+            if latent_sample is not None:
+                z_flat = self.rescale(latent_sample, Fraction(1, self.supersampling_factor))
+
+                if getattr(output, "gaussian_latent", None) is not None:
+                    z = rearrange(z_flat, "(b v) c h w -> b v c h w", b=b, v=v_t)
                 else:
-                    print("[WARNING] feature_posterior is None, creating dummy latent sample")
-                    # 创建虚拟的潜在样本以避免错误 - 使用正确的变量名
-                    batch_size = batch["target"]["image"].shape[0] if batch["target"]["image"] is not None else 1
-                    device = batch["target"]["image"].device if batch["target"]["image"] is not None else self.device
-                    latent_sample = torch.randn(batch_size, 4, 8, 8, device=device)
+                    z = z_flat
 
-                z = self.rescale(latent_sample, Fraction(1, self.supersampling_factor))
+            # 仅在 VAE 模式更新 image，不覆盖 GSU 模式
+            if output.feature_posterior is not None:
                 target_render_latent_pred.image = z
 
-                if is_active_loss["target_combined"]:
+            # ====================== GSU: 几何-语义 + 不确定性耦合 ======================
+            feat_5d = getattr(output, "gaussian_latent", None)
+            is_gsu = (feat_5d is not None) and (feat_5d.shape[2] == 65)
+
+            if is_gsu and self.gsu_cfg:
+
+                # ------------ 读取开关 ------------
+                gs_enabled = self.gsu_cfg.get("geom_sem_contrast", {}).get("enabled", True)
+                us_enabled = self.gsu_cfg.get("unc_sem_couple", {}).get("enabled", True)
+
+                # ------------ 通道切分 ------------
+                z_geom_feat = feat_5d[:, :, 0:32]
+                z_sem_feat  = feat_5d[:, :, 32:64]
+                sigma_map   = feat_5d[:, :, 64:65]
+
+                target_render_latent_pred.geo = z_geom_feat
+                target_render_latent_pred.sem = z_sem_feat
+
+                # ------------------ G-S loss ------------------
+                if gs_enabled and self.geom_sem_loss:
+                    gs_loss_unweighted = self.geom_sem_loss.unweighted_loss(
+                        target_render_latent_pred, None
+                    )
+                    gs_w = self.geom_sem_loss.get_weight(self.step_tracker.get_step())
+                    generator_loss += gs_w * gs_loss_unweighted
+                    self.log("loss/generator/geom_sem_contrast", gs_loss_unweighted)
+
+                # ------------------ U-S loss ------------------
+                if us_enabled and self.unc_sem_loss:
+                    us_loss_unweighted = self.unc_sem_loss(
+                        z_geom_feat, z_sem_feat, sigma_map,  # 按你 loss 需要的输入来写
+                    )
+                    generator_loss += self.unc_sem_loss_weight * us_loss_unweighted
+                    self.log("loss/generator/unc_sem_couple", us_loss_unweighted)
+            # 新增=======================================================================
+
+            if is_active_loss["target_combined"]:
+                # Decode not batched with autoencoder branch because of skip connections
+                if self.autoencoder.expects_skip:
+                    skip_z = torch.cat((output.color.detach(), latent_sample), dim=-3) if self.autoencoder.expects_skip_extra else latent_sample
+                else:
                     skip_z = None
-                    if self.autoencoder.expects_skip:
-                        skip_z = torch.cat((output.color.detach(), latent_sample), dim=-3) \
-                            if self.autoencoder.expects_skip_extra else latent_sample
-                    target_combined_pred.image = self.autoencoder.decode(z, skip_z)
+                target_combined_pred.image = self.autoencoder.decode(z, skip_z)
+        
+        # Apply Autoencoder decoder batched
+        if latents_to_decode:
+            split_sizes = [prod(l.shape[:-3]) for l in latents_to_decode.values()]
+            latents = torch.cat([l.flatten(0, -4) for l in latents_to_decode.values()])
+            images = self.autoencoder.decode(latents)
+            pred_images = dict(zip(latents_to_decode.keys(), images.split(split_sizes)))
+            if is_active_loss["context"]:
+                context_pred.image = rearrange(pred_images["context"], "(b v) c h w -> b v c h w", b=b, v=v_c)
+            if is_active_loss["target_autoencoder"]:
+                target_autoencoder_pred.image = rearrange(pred_images["target"], "(b v) c h w -> b v c h w", b=b, v=v_t)
 
-            # 4) 批量解码 latents
-            if latents_to_decode:
-                split_sizes = [prod(l.shape[:-3]) for l in latents_to_decode.values()]
-                latents = torch.cat([l.flatten(0, -4) for l in latents_to_decode.values()])
-                images = self.autoencoder.decode(latents)
-                pred_images = dict(zip(latents_to_decode.keys(), images.split(split_sizes)))
-                if is_active_loss["context"]:
-                    context_pred.image = rearrange(pred_images["context"],
-                                                "(b v) c h w -> b v c h w", b=b, v=v_c)
-                if is_active_loss["target_autoencoder"]:
-                    target_autoencoder_pred.image = rearrange(pred_images["target"],
-                                                            "(b v) c h w -> b v c h w", b=b, v=v_t)
+        # Compute and log image metrics
+        for view, pred, gt in zip(
+            ("context", "target_autoencoder", "target_render", "target_combined"), 
+            (context_pred, target_autoencoder_pred, target_render_image_pred, target_combined_pred),
+            (context_gt, target_autoencoder_gt, target_render_image_gt, target_combined_gt)
+        ):
+            if gt.image is not None and pred.image is not None:
+                psnr = compute_psnr(
+                    rearrange(gt.image, "b v c h w -> (b v) c h w"),
+                    rearrange(pred.image, "b v c h w -> (b v) c h w"),
+                )
+                self.log(f"train/{view}/psnr", psnr.mean())
 
-            # ---------- 指标日志 ----------
-            for view, pred, gt in zip(
-                    ("context", "target_autoencoder", "target_render", "target_combined"),
-                    (context_pred, target_autoencoder_pred, target_render_image_pred, target_combined_pred),
-                    (context_gt, target_autoencoder_gt, target_render_image_gt, target_combined_gt)):
-                if gt.image is not None and pred.image is not None:
-                    psnr = compute_psnr(
-                        rearrange(gt.image, "b v c h w -> (b v) c h w"),
-                        rearrange(pred.image, "b v c h w -> (b v) c h w"))
-                    self.log(f"train/{view}/psnr", psnr.mean())
+        # Compute discriminator logits for generator losses
+        for loss_group, pred in zip(
+            (self.context_losses, self.target_autoencoder_losses, self.target_combined_losses),
+            (context_pred, target_autoencoder_pred, target_combined_pred),
+        ):
+            if loss_group.is_generator_loss_active(self.step_tracker.get_step()):
+                b, v = pred.image.shape[:2]
+                logits_fake = self.discriminator(rearrange(pred.image, "b v c h w -> (b v) c h w"))     # TODO allow any number of batch dimensions in discriminator
+                pred.logits_fake = rearrange(logits_fake, "(b v) c h w -> b v c h w", b=b, v=v)
+        
+        # Compute and log loss for generator
+        generator_loss = 0
+        for loss_group, pred, gt in zip( 
+            (self.gaussian_losses, self.context_losses, self.target_autoencoder_losses, self.target_render_image_losses, self.target_render_latent_losses, self.target_combined_losses),
+            (gaussian_pred, context_pred, target_autoencoder_pred, target_render_image_pred, target_render_latent_pred, target_combined_pred),
+            (None, context_gt, target_autoencoder_gt, target_render_image_gt, target_render_latent_gt, target_combined_gt)
+        ):
+            # 1. 先打组名，确认循环进来了
+            print(f"[DEBUG] loss_group={loss_group.name}")
+            group_loss, loss_dict = loss_group.forward_generator(
+                pred, gt, self.global_step, self.last_layer_weight
+            )
+            # 2. 把 dict 里所有 key 打印出来
+            print(f"[DEBUG]   ↳ loss_dict.keys() = {list(loss_dict.keys())}")
+            for loss_name, loss in loss_dict.items():
+                # 3. 把值也打印，确认不是 0
+                print(f"[DEBUG]   ↳ {loss_name}  unweighted={loss.unweighted.item():.6f}")
+                self.log(f"loss/generator/{loss_name}", loss.unweighted)
+            self.log(f"loss/generator/{loss_group.name}/total", group_loss)
 
-            # ---------- 判别器 logits ----------
-            for loss_group, pred in zip(
-                    (self.context_losses, self.target_autoencoder_losses, self.target_combined_losses),
-                    (context_pred, target_autoencoder_pred, target_combined_pred)):
-                if loss_group.is_generator_loss_active(self.step_tracker.get_step()):
-                    b, v = pred.image.shape[:2]
-                    logits_fake = self.discriminator(
-                        rearrange(pred.image, "b v c h w -> (b v) c h w"))
-                    pred.logits_fake = rearrange(logits_fake, "(b v) c h w -> b v c h w", b=b, v=v)
+            group_loss, loss_dict = loss_group.forward_generator(pred, gt, self.step_tracker.get_step(), self.last_layer_weight)
+            for loss_name, loss in loss_dict.items():
+                self.log(f"loss/generator/{loss_name}", loss.unweighted)
+            self.log(f"loss/generator/{loss_group.name}/total", group_loss)
+            generator_loss = generator_loss + group_loss
 
-            # ---------- 生成器损失 ----------
-            generator_loss = 0.
-            for loss_group, pred, gt in zip(
-                    (self.gaussian_losses, self.context_losses, self.target_autoencoder_losses,
-                    self.target_render_image_losses, self.target_render_latent_losses, self.target_combined_losses),
-                    (gaussian_pred, context_pred, target_autoencoder_pred,
-                    target_render_image_pred, target_render_latent_pred, target_combined_pred),
-                    (None, context_gt, target_autoencoder_gt,
-                    target_render_image_gt, target_render_latent_gt, target_combined_gt)):
-                if loss_group is None:
-                    continue
-                if gt is None:
-                    print(f"[WARNING] GT for {loss_group.name} is None")
-                    continue
-                group_loss, loss_dict = loss_group.forward_generator(
-                    pred, gt, self.step_tracker.get_step(), self.last_layer_weight)
-                for loss_name, loss in loss_dict.items():
-                    self.log(f"loss/generator/{loss_name}", loss.unweighted)
-                self.log(f"loss/generator/{loss_group.name}/total", group_loss)
-                generator_loss = generator_loss + group_loss
+        self.log(f"loss/generator/total", generator_loss)
 
-            if self.gaussian_losses is not None:
-                _, gaussian_loss_dict = self.gaussian_losses.forward_generator(
-                    gaussian_pred, None, self.step_tracker.get_step(), self.last_layer_weight)
-            else:
-                log("gaussian_losses is None, skipping forward_generator")
-
-            # ---------- 生成器反向 ----------
-            if isinstance(generator_loss, Tensor) and not generator_loss.isnan().any():
-                print(f"[DEBUG] Generator loss: {generator_loss.item()}")
+        if isinstance(generator_loss, Tensor):
+            if not generator_loss.isnan().any():
+                # Generator optimization step
                 g_opt.zero_grad()
-                # self.manual_backward(generator_loss)
-                with torch.autograd.set_detect_anomaly(True):
-                    self.manual_backward(generator_loss)
+                self.manual_backward(generator_loss)
+                # Clip gradients manually (manual optimization)
                 self.clip_gradients(
-                    g_opt,
-                    gradient_clip_val=self.optimizer_cfg.generator.gradient_clip_val,
-                    gradient_clip_algorithm=self.optimizer_cfg.generator.gradient_clip_algorithm)
+                    g_opt, 
+                    gradient_clip_val=self.optimizer_cfg.generator.gradient_clip_val, 
+                    gradient_clip_algorithm=self.optimizer_cfg.generator.gradient_clip_algorithm
+                )
                 g_opt.step()
             else:
-                warn(f"NaN generator_loss at step {self.step_tracker.get_step()}")
+                warn(f"Encountered nan generator loss in iteration {self.step_tracker.get_step()}")
+        
+        self.untoggle_optimizer(g_opt)
 
-            self.untoggle_optimizer(g_opt)
+        if self.discriminator is not None:
+            # Second discriminator optimization
+            self.toggle_optimizer(d_opt)
 
-            # ---------- 判别器损失 & 反向 ----------
-            if self.discriminator is not None:
-                self.toggle_optimizer(d_opt)
-                discriminator_loss = 0.
-                for loss_group, pred, gt in zip(
-                        (self.context_losses, self.target_autoencoder_losses, self.target_combined_losses),
-                        (context_pred, target_autoencoder_pred, target_combined_pred),
-                        (context_gt, target_autoencoder_gt, target_combined_gt)):
-                    if loss_group.is_discriminator_loss_active(self.step_tracker.get_step()):
-                        if gt is None:
-                            print(f"[WARNING] GT for {loss_group.name} is None")
-                            continue
-                        b, v = pred.image.shape[:2]
-                        logits_fake = self.discriminator(
-                            rearrange(pred.image.detach(), "b v c h w -> (b v) c h w"))
-                        logits_real = self.discriminator(
-                            rearrange(gt.image, "b v c h w -> (b v) c h w"))
-                        pred.logits_fake = rearrange(logits_fake, "(b v) c h w -> b v c h w", b=b, v=v)
-                        pred.logits_real = rearrange(logits_real, "(b v) c h w -> b v c h w", b=b, v=v)
-                        group_loss, loss_dict = loss_group.forward_discriminator(
-                            pred, gt, self.step_tracker.get_step())
-                        for loss_name, loss in loss_dict.items():
-                            self.log(f"loss/discriminator/{loss_name}", loss.unweighted)
-                        self.log(f"loss/discriminator/{loss_group.name}/total", group_loss)
-                        discriminator_loss = discriminator_loss + group_loss
+            discriminator_loss = 0
+            for loss_group, pred, gt in zip(
+                (self.context_losses, self.target_autoencoder_losses, self.target_combined_losses),
+                (context_pred, target_autoencoder_pred, target_combined_pred),
+                (context_gt, target_autoencoder_gt, target_combined_gt)
+            ):  
+                if loss_group.is_discriminator_loss_active(self.step_tracker.get_step()):
+                    # TODO allow any number of batch dimensions in discriminator
+                    b, v = pred.image.shape[:2]
+                    logits_fake = self.discriminator(rearrange(pred.image.detach(), "b v c h w -> (b v) c h w"))    # NOTE detach here
+                    logits_real = self.discriminator(rearrange(gt.image, "b v c h w -> (b v) c h w"))
+                    pred.logits_fake = rearrange(logits_fake, "(b v) c h w -> b v c h w", b=b, v=v)
+                    pred.logits_real = rearrange(logits_real, "(b v) c h w -> b v c h w", b=b, v=v)
+                    group_loss, loss_dict = loss_group.forward_discriminator(pred, gt, self.step_tracker.get_step())
+                    for loss_name, loss in loss_dict.items():
+                        self.log(f"loss/discriminator/{loss_name}", loss.unweighted)
+                    self.log(f"loss/discriminator/{loss_group.name}/total", group_loss)
+                    discriminator_loss = discriminator_loss + group_loss
 
-                self.log("loss/discriminator/total", discriminator_loss)
+            self.log(f"loss/discriminator/total", discriminator_loss)
 
-                if isinstance(discriminator_loss, Tensor) and not discriminator_loss.isnan().any():
+            if isinstance(discriminator_loss, Tensor):
+                if not discriminator_loss.isnan().any():
+                    # Discriminator optimization step
                     d_opt.zero_grad()
                     self.manual_backward(discriminator_loss)
+                    # Clip gradients manually (manual optimization)
                     self.clip_gradients(
-                        d_opt,
-                        gradient_clip_val=self.optimizer_cfg.discriminator.gradient_clip_val,
-                        gradient_clip_algorithm=self.optimizer_cfg.discriminator.gradient_clip_algorithm)
+                        d_opt, 
+                        gradient_clip_val=self.optimizer_cfg.discriminator.gradient_clip_val, 
+                        gradient_clip_algorithm=self.optimizer_cfg.discriminator.gradient_clip_algorithm
+                    )
                     d_opt.step()
                 else:
-                    warn(f"NaN discriminator_loss at step {self.step_tracker.get_step()}")
+                    warn(f"Encountered nan discriminator loss in iteration {self.step_tracker.get_step()}")
+            
+            self.untoggle_optimizer(d_opt)
+        else:
+            discriminator_loss = None
 
-                self.untoggle_optimizer(d_opt)
+        # Print progress
+        if self.global_rank == 0:
+            progress = f"train step {self.step_tracker.get_step()}; " \
+                f"scene = {batch['scene']}; " \
+                f"context = {batch['context']['index'].tolist()}; " \
+                f"generator loss = {generator_loss:.6f}; "
+            if discriminator_loss is not None:
+                progress += f"discriminator loss = {discriminator_loss:.6f}"
+            print(progress)
+
+        # Do all scheduler steps
+        schedulers = self.lr_schedulers()
+        if schedulers:  # schedulers is not None and not empty list
+            if isinstance(schedulers, list):
+                for scheduler in schedulers:
+                    scheduler.step()
             else:
-                discriminator_loss = None
+                schedulers.step()
+            
 
-            # ---------- 进度 & scheduler ----------
-            if self.global_rank == 0:
-                progress = (f"train step {self.step_tracker.get_step()}; "
-                            f"scene = {batch['scene']}; "
-                            f"context = {batch['context']['index'].tolist()}; "
-                            f"generator loss = {generator_loss:.6f}")
-                if discriminator_loss is not None:
-                    progress += f"; discriminator loss = {discriminator_loss:.6f}"
+    def test_step(self, batch, batch_idx):
+        print(">>> Saving results to:", self.test_cfg.output_path)
+        batch: BatchedExample = self.data_shim(batch)
 
-            self.log("loss/generator/total", generator_loss, prog_bar=True)
+        b, v = batch["target"]["image"].shape[:2]
+        size = self.get_scaled_size(self.scale_factor, batch["target"]["image"].shape[-2:])
 
-            schedulers = self.lr_schedulers()
-            if schedulers:
-                if isinstance(schedulers, list):
-                    for sch in schedulers:
-                        sch.step()
-                else:
-                    schedulers.step()
+        assert b == 1
+        if batch_idx % 100 == 0:
+            print(f"Test step {batch_idx:0>6}.")
 
-        # 粘到 ModelWrapper 类里
-        def build_spiral_camera(self, b, azim_deg, elev_deg=20., dist=2.):
-            """返回虚拟相机外参 tensor [b, 4, 4]"""
-            import math
-            azim = math.radians(azim_deg)
-            elev = math.radians(elev_deg)
-            cam_pos = torch.tensor([dist * math.cos(elev) * math.sin(azim),
-                                    dist * math.sin(elev),
-                                    dist * math.cos(elev) * math.cos(azim)],
-                                device=self.device)
-            target = torch.zeros(3, device=self.device)
-            up = torch.tensor([0., 1., 0.], device=self.device)
+        # Render Gaussians.
+        if self.encode_latents:
+            with self.benchmarker.time("autoencoder_encoder", num_calls=batch["context"]["image"].shape[1]):
+                posterior = self.autoencoder.encode(batch["context"]["image"])
+                context_latents = posterior.sample()
+        else:
+            context_latents = None
 
-            # look-at
-            z = (cam_pos - target) / torch.norm(cam_pos - target)
-            x = torch.cross(up, z)
-            x /= x.norm()
-            y = torch.cross(z, x)
-            pose = torch.eye(4, device=self.device)
-            pose[:3, 0] = x
-            pose[:3, 1] = y
-            pose[:3, 2] = z
-            pose[:3, 3] = cam_pos
-            return pose.unsqueeze(0).repeat(b, 1, 1)   # [b,4,4]
+        with self.benchmarker.time("encoder"):
+            gaussians: VariationalGaussians = self.encoder(
+                batch["context"],
+                self.step_tracker.get_step(),
+                features=context_latents,
+                deterministic=False,
+            )
+        with self.benchmarker.time("decoder", num_calls=v):
+            output = self.decoder.forward(
+                gaussians.sample() if self.variational in ("gaussians", "none") else gaussians.flatten(),     # Sample from variational Gaussians
+                batch["target"]["extrinsics"],
+                batch["target"]["intrinsics"],
+                batch["target"]["near"],
+                batch["target"]["far"],
+                size,
+            )
+        
+        with self.benchmarker.time("autoencoder_decoder", num_calls=v):
+            latent_sample = output.feature_posterior.sample()
+            # Invert supersampling
+            z = self.rescale(latent_sample, Fraction(1, self.supersampling_factor))
+            if self.autoencoder.expects_skip:
+                skip_z = torch.cat((output.color.detach(), latent_sample), dim=-3) if self.autoencoder.expects_skip_extra else latent_sample
+            else:
+                skip_z = None
+            target_pred_image = self.autoencoder.decode(z, skip_z)
 
-    # ---------------- 验证 / 测试 / 视频 --------------- #
+        # Save images.
+        (scene,) = batch["scene"]
+        context_index_str = "_".join(map(str, sorted(batch["context"]["index"][0].tolist())))
+        name = get_cfg()["wandb"]["name"]
+        path = self.test_cfg.output_path / name
+        for index, color in zip(batch["target"]["index"][0], target_pred_image[0]):
+            save_image(color, path / scene / context_index_str / f"color/{index:0>6}.png")
+
+        save_path = path / scene / context_index_str / f"color/{index:0>6}.png"
+        save_image(color, save_path)
+        print(f"[调试] 保存预测路径: {save_path}")
+        print(f"已保存 {len(batch['target']['index'][0])} 张预测图到 {path}")
+
+    def on_test_end(self) -> None:
+        name = get_cfg()["wandb"]["name"]
+        self.benchmarker.dump(self.test_cfg.output_path / name / "benchmark.json")
+        self.benchmarker.dump_memory(
+            self.test_cfg.output_path / name / "peak_memory.json"
+        )
+
     @rank_zero_only
-    def validation_step(self, batch: BatchedExample, batch_idx: int):
+    def validation_step(self, batch, batch_idx):
+        batch: BatchedExample = self.data_shim(batch)
+
         if self.global_rank == 0:
             print(
                 f"validation step {self.step_tracker.get_step()}; "
@@ -728,221 +732,450 @@ class ModelWrapper(LightningModule):
 
         b, v = batch["target"]["image"].shape[:2]
         assert b == 1
+
         size = self.get_scaled_size(self.scale_factor, batch["target"]["image"].shape[-2:])
 
-        pred = {"low": {}, "high": {}}
-
-        # ---------- 1. 概率前向 ----------
+        pred = {
+            "low": {},
+            "high": {}
+        }
+        # Render Gaussians.
+        # Probabilistic pass
         if self.encode_latents:
             posterior = self.autoencoder.encode(batch["context"]["image"])
             context_latents = posterior.sample()
         else:
             context_latents = None
 
-        gaussians_prob: VariationalGaussians = self.encoder(
+        gaussians_probabilistic: VariationalGaussians = self.encoder(
             batch["context"],
             self.step_tracker.get_step(),
             features=context_latents,
             deterministic=False,
         )
-        output_prob = self.decoder.forward(
-            gaussians_prob.sample() if self.variational in ("gaussians", "none") else gaussians_prob.flatten(),
+        output_probabilistic = self.decoder.forward(
+            gaussians_probabilistic.sample() if self.variational in ("gaussians", "none") else gaussians_probabilistic.flatten(),
             batch["target"]["extrinsics"],
             batch["target"]["intrinsics"],
             batch["target"]["near"],
             batch["target"]["far"],
             size,
         )
-        pred["low"]["probabilistic"] = output_prob.color[0]
-        latent_prob = output_prob.feature_posterior.sample()[0]
+        pred["low"]["probabilistic"] = output_probabilistic.color[0]
+        latent_probabilistic = output_probabilistic.feature_posterior.sample()[0]
 
-        # ---------- 2. 确定性前向 ----------
-        gaussians_det: VariationalGaussians = self.encoder(
+        print('raw gaussian_latent shape:',
+      getattr(output_probabilistic, 'gaussian_latent', None) and output_probabilistic.gaussian_latent.shape)
+
+        # Deterministic pass
+        gaussians_deterministic: VariationalGaussians = self.encoder(
             batch["context"],
             self.step_tracker.get_step(),
             features=posterior.mode() if self.encode_latents else None,
             deterministic=True,
         )
-        output_det = self.decoder.forward(
-            gaussians_det.mode() if self.variational in ("gaussians", "none") else gaussians_prob.flatten(),
+        output_deterministic = self.decoder.forward(
+            # gaussians_deterministic.mode() if self.variational in ("gaussians", "none") else gaussians_probabilistic.flatten(),
+            # 新增修改----------------------------------------
+            gaussians_deterministic.mode() if self.variational in ("gaussians", "none") else gaussians_deterministic.flatten(),
             batch["target"]["extrinsics"],
             batch["target"]["intrinsics"],
             batch["target"]["near"],
             batch["target"]["far"],
             size,
         )
-        pred["low"]["deterministic"] = output_det.color[0]
-        latent_det = output_det.feature_posterior.mode()[0]
+        pred["low"]["deterministic"] = output_deterministic.color[0]
+        latent_deterministic = output_deterministic.feature_posterior.mode()[0]
 
-        # ---------- 3. 高分辨率解码 ----------
-        latents = torch.cat([latent_prob, latent_det])
+       # 新增--------------------------------------------------------------------------
+        # 安全获取 latent（兼容 VAE / GSU）
+        def safe_gsu_latent(output, is_prob):
+            # 1) GSU gaussian_latent
+            if self.use_gsu and getattr(output, "gaussian_latent", None) is not None:
+                feat_5d = output.gaussian_latent[0]  # [V,C,H,W]
+                z_geom_feat = feat_5d[:, 0:32]       # [V,32,H,W]
+                z_sem_feat  = feat_5d[:, 32:64]      # [V,32,H,W]
+                sigma_map   = feat_5d[:, 64:65]      # [V,1,H,W]
+
+                # 根据你在 YAML 控制的两个开关进行输出
+                if self.use_geo_sem_contrast:
+                    return torch.cat([z_geom_feat, z_sem_feat], dim=1)  # [V,64,H,W]
+
+                elif self.use_uncert_sem_coupling:
+                    return torch.cat([sigma_map, z_sem_feat], dim=1)   # [V,33,H,W]
+
+                else:
+                    return torch.cat([z_geom_feat, z_sem_feat, sigma_map], dim=1)  # [V,65,H,W]
+
+            # 2) VAE feature posterior
+            fp = getattr(output, "feature_posterior", None)
+            if fp is not None:
+                return fp.sample()[0] if is_prob else fp.mode()[0]
+
+            # 3) fallback
+            C = 65 if self.use_gsu else 32
+            H = output.color.shape[1]
+            W = output.color.shape[2]
+            return torch.zeros((1, C, H, W), device=output.color.device)
+
+        # Probabilistic / Deterministic latent
+        latent_probabilistic = safe_gsu_latent(output_probabilistic, is_prob=True)
+        latent_deterministic = safe_gsu_latent(output_deterministic, is_prob=False)
+        # 新增-------------------------------------------------
+
+        latents = torch.cat((latent_probabilistic, latent_deterministic))
+        # Invert supersampling
         z = self.rescale(latents, Fraction(1, self.supersampling_factor))
-
         if self.autoencoder.expects_skip:
             if self.autoencoder.expects_skip_extra:
-                colors = torch.cat([pred["low"]["probabilistic"], pred["low"]["deterministic"]])
-                skip_z = torch.cat([colors, latents], dim=-3)
+                colors = torch.cat((pred["low"]["probabilistic"], pred["low"]["deterministic"]))
+                skip_z = torch.cat((colors, latents), dim=-3)   # -3 = channel dimension
             else:
                 skip_z = latents
         else:
             skip_z = None
-
         dec = self.autoencoder.decode(z, skip_z)
         pred["high"]["probabilistic"], pred["high"]["deterministic"] = dec.tensor_split(2)
 
-        # ---------- 4. 指标计算 ----------
+        # Compute validation metrics.
         rgb_high_res_gt = batch["target"]["image"][0]
-        rgb_low_res_gt  = self.rescale(rgb_high_res_gt, self.scale_factor)
+        rgb_low_res_gt = self.rescale(rgb_high_res_gt, self.scale_factor)
 
         for mode in ("deterministic", "probabilistic"):
+            # Skip lpips and ssim for low resolution, because too small
             score = compute_psnr(rgb_low_res_gt, pred["low"][mode]).mean()
             self.log(f"val/{mode}/low/psnr", score, rank_zero_only=True)
-
             for metric_name, metric in zip(
                 ("psnr", "lpips", "ssim"),
-                (compute_psnr, compute_lpips, compute_ssim),
+                (compute_psnr, compute_lpips, compute_ssim)
             ):
                 score = metric(rgb_high_res_gt, pred["high"][mode]).mean()
                 self.log(f"val/{mode}/high/{metric_name}", score, rank_zero_only=True)
 
-        # ---------- 5. 可视化 ----------
-        comparison_low = add_border(
+        # Construct comparison image.
+        comparison = {}
+        # Skip high resolution context images and labels for low resolution comparison
+        comparison["low"] = add_border(
             hcat(
                 vcat(*rgb_low_res_gt, gap=1),
                 vcat(*pred["low"]["probabilistic"], gap=1),
                 vcat(*pred["low"]["deterministic"], gap=1),
-                gap=1,
+                gap=1
             ),
-            border=1,
+            border=1
         )
-        comparison_high = add_border(
-            hcat(
-                add_label(vcat(*batch["context"]["image"][0]), "Context"),
-                add_label(vcat(*rgb_high_res_gt), "Target (Ground Truth)"),
-                add_label(vcat(*pred["high"]["probabilistic"]), "Target (Probabilistic)"),
-                add_label(vcat(*pred["high"]["deterministic"]), "Target (Deterministic)"),
-            )
-        )
+        comparison["high"] = add_border(hcat(
+            add_label(vcat(*batch["context"]["image"][0]), "Context"),
+            add_label(vcat(*rgb_high_res_gt), "Target (Ground Truth)"),
+            add_label(vcat(*pred["high"]["probabilistic"]), "Target (Probabilistic)"),
+            add_label(vcat(*pred["high"]["deterministic"]), "Target (Deterministic)"),
+        ))
+        # 更改日志兼容性，支持 WandB + TensorBoard
+        # --- comparison 图像记录 ---
+        for res, comp in comparison.items():
+            img = prep_image(comp)
+            step = self.step_tracker.get_step()
+            caption = batch["scene"]
 
-        self.logger.log_image(
-            "comparison_low", [prep_image(comparison_low)], step=self.step_tracker.get_step(), caption=batch["scene"]
-        )
-        self.logger.log_image(
-            "comparison_high", [prep_image(comparison_high)], step=self.step_tracker.get_step(), caption=batch["scene"]
-        )
+            # --- 转 tensor ---
+            if isinstance(img, np.ndarray):
+                img = torch.from_numpy(img)
+            if img.ndim == 3 and img.shape[-1] in [1, 3]:
+                img = img.permute(2, 0, 1)
+            elif img.ndim == 4 and img.shape[-1] in [1, 3]:
+                img = img.permute(0, 3, 1, 2)
 
-        # ---------- 6. 相机轨迹视频 ----------
+            # --- 确保类型 ---
+            img = img.float()
+
+            # --- 根据 logger 类型动态选择记录方法 ---
+            try:
+                if hasattr(self.logger, "log_image"):
+                    # WandB 或自定义 ImageLogger
+                    self.logger.log_image(
+                        key=f"comparison_{res}",
+                        images=[img],
+                        step=step,
+                        caption=caption,
+                    )
+                elif hasattr(self.logger, "experiment") and hasattr(self.logger.experiment, "add_image"):
+                    # TensorBoardLogger
+                    grid = torchvision.utils.make_grid(img, normalize=True, scale_each=True)
+                    self.logger.experiment.add_image(f"comparison_{res}", grid, global_step=step)
+            except Exception as e:
+                print(f"[WARN] Failed to log image {res}: {e}")
+
+
+        # --- Cameras ---
         cameras = hcat(*render_cameras(batch, 256))
-        self.logger.log_image("cameras", [prep_image(add_border(cameras))], step=self.step_tracker.get_step())
+        img = prep_image(add_border(cameras))
+        step = self.step_tracker.get_step()
+        try:
+            if hasattr(self.logger, "log_image"):
+                self.logger.log_image("cameras", [img], step=step)
+            else:
+                img = torch.from_numpy(img).permute(2, 0, 1).float()
+                self.logger.experiment.add_image("cameras", img, global_step=step)
+        except Exception as e:
+            print(f"[WARN] Failed to log camera view: {e}")
 
-        # ---------- 7. 视频生成 ----------
-        if self.train_cfg.video_interpolation:
-            self.render_video_interpolation(batch)
-        if self.train_cfg.video_wobble:
-            self.render_video_wobble(batch)
-        if self.train_cfg.extended_visualization:
-            self.render_video_interpolation_exaggerated(batch)
 
-    def test_step(self, batch: BatchedExample, batch_idx: int) -> None:
-        print(f">>> 测试步骤开始，batch_idx: {batch_idx}")
-        print(f">>> batch 形状: {batch['target']['image'].shape if 'target' in batch else 'No target'}")
-        batch = self.data_shim(batch)
-        b, v = batch["target"]["image"].shape[:2]
-        size = self.get_scaled_size(1.0, batch["target"]["image"].shape[-2:])
-        assert b == 1
-        print(f">>> 处理后 batch 形状: {batch['target']['image'].shape}")
-        # ---------- 1. 编码 ----------
+        # --- Encoder Visualizer ---
+        if self.encoder_visualizer is not None:
+            for k, image in self.encoder_visualizer.visualize(
+                batch["context"], 
+                self.step_tracker.get_step(),
+                features=posterior.mode() if self.encode_latents else None
+            ).items():
+                img = prep_image(image)
+                step = self.step_tracker.get_step()
+                try:
+                    if hasattr(self.logger, "log_image"):
+                        self.logger.log_image(k, [img], step=step)
+                    else:
+                        img = torch.from_numpy(img).permute(2, 0, 1).float()
+                        self.logger.experiment.add_image(k, img, global_step=step)
+                except Exception as e:
+                    print(f"[WARN] Failed to log encoder visualizer {k}: {e}")
+
+    @rank_zero_only
+    def render_video_wobble(self, batch: BatchedExample) -> None:
+        # Two views are needed to get the wobble radius.
+        _, v, _, _ = batch["context"]["extrinsics"].shape
+        if v != 2:
+            return
+
+        def trajectory_fn(t):
+            origin_a = batch["context"]["extrinsics"][:, 0, :3, 3]
+            origin_b = batch["context"]["extrinsics"][:, 1, :3, 3]
+            delta = (origin_a - origin_b).norm(dim=-1)
+            extrinsics = generate_wobble(
+                batch["context"]["extrinsics"][:, 0],
+                delta * 0.25,
+                t,
+            )
+            intrinsics = repeat(
+                batch["context"]["intrinsics"][:, 0],
+                "b i j -> b v i j",
+                v=t.shape[0],
+            )
+            return extrinsics, intrinsics
+
+        return self.render_video_generic(batch, trajectory_fn, "wobble", num_frames=60)
+
+    @rank_zero_only
+    def render_video_interpolation(self, batch: BatchedExample) -> None:
+        _, v, _, _ = batch["context"]["extrinsics"].shape
+
+        def trajectory_fn(t):
+            extrinsics = interpolate_extrinsics(
+                batch["context"]["extrinsics"][0, 0],
+                batch["context"]["extrinsics"][0, 1]
+                if v == 2
+                else batch["target"]["extrinsics"][0, 0],
+                t,
+            )
+            intrinsics = interpolate_intrinsics(
+                batch["context"]["intrinsics"][0, 0],
+                batch["context"]["intrinsics"][0, 1]
+                if v == 2
+                else batch["target"]["intrinsics"][0, 0],
+                t,
+            )
+            return extrinsics[None], intrinsics[None]
+
+        return self.render_video_generic(batch, trajectory_fn, "rgb")
+
+    @rank_zero_only
+    def render_video_interpolation_exaggerated(self, batch: BatchedExample) -> None:
+        # Two views are needed to get the wobble radius.
+        _, v, _, _ = batch["context"]["extrinsics"].shape
+        if v != 2:
+            return
+
+        def trajectory_fn(t):
+            origin_a = batch["context"]["extrinsics"][:, 0, :3, 3]
+            origin_b = batch["context"]["extrinsics"][:, 1, :3, 3]
+            delta = (origin_a - origin_b).norm(dim=-1)
+            tf = generate_wobble_transformation(
+                delta * 0.5,
+                t,
+                5,
+                scale_radius_with_t=False,
+            )
+            extrinsics = interpolate_extrinsics(
+                batch["context"]["extrinsics"][0, 0],
+                batch["context"]["extrinsics"][0, 1]
+                if v == 2
+                else batch["target"]["extrinsics"][0, 0],
+                t * 5 - 2,
+            )
+            intrinsics = interpolate_intrinsics(
+                batch["context"]["intrinsics"][0, 0],
+                batch["context"]["intrinsics"][0, 1]
+                if v == 2
+                else batch["target"]["intrinsics"][0, 0],
+                t * 5 - 2,
+            )
+            return extrinsics @ tf, intrinsics[None]
+
+        return self.render_video_generic(
+            batch,
+            trajectory_fn,
+            "interpolation_exagerrated",
+            num_frames=300,
+            smooth=False,
+            loop_reverse=False,
+        )
+
+    @rank_zero_only
+    def render_video_generic(
+        self,
+        batch: BatchedExample,
+        trajectory_fn: TrajectoryFn,
+        name: str,
+        num_frames: int = 30,
+        smooth: bool = True,
+        loop_reverse: bool = True,
+    ) -> None:
+        # Render probabilistic estimate of scene.
         if self.encode_latents:
             posterior = self.autoencoder.encode(batch["context"]["image"])
-            context_latents = posterior.sample()
-        else:
-            context_latents = None
 
-        # ---------- 2. 渲染 ----------
-        gaussians: VariationalGaussians = self.encoder(
-            batch["context"],
+        gaussians_prob: VariationalGaussians = self.encoder(
+            batch["context"], 
             self.step_tracker.get_step(),
-            features=context_latents,
-            deterministic=False,
+            features=posterior.sample() if self.encode_latents else None,
+            deterministic=False
+        )
+        gaussians_det: VariationalGaussians = self.encoder(
+            batch["context"], 
+            self.step_tracker.get_step(),
+            features=posterior.mode() if self.encode_latents else None,
+            deterministic=True
         )
 
-        output = self.decoder.forward(
-            gaussians.sample() if self.variational in ("gaussians", "none") else gaussians.flatten(),
-            batch["target"]["extrinsics"],
-            batch["target"]["intrinsics"],
-            batch["target"]["near"],
-            batch["target"]["far"],
-            size,
-            depth_mode=self.train_cfg.depth_mode,
-        )
-        # ---------- 3. 解码 ----------
-        latent_sample = output.feature_posterior.sample()
-        z = self.rescale(latent_sample, Fraction(1, self.supersampling_factor))
+        t = torch.linspace(0, 1, num_frames, dtype=torch.float32, device=self.device)
+        if smooth:
+            t = (torch.cos(torch.pi * (t + 1)) + 1) / 2
 
-        # 1. 投影到 VAE 期望的通道数
-        if z.shape[-3] != self.autoencoder.latent_channels:
-            # 临时 1×1 卷积，权重随推理即可（也可换成 nn.Conv2d 注册）
-            z = torch.nn.functional.conv2d(
-                z,
-                weight=torch.randn(
-                    self.autoencoder.latent_channels,
-                    z.shape[-3], 1, 1,
-                    device=z.device,
-                    dtype=z.dtype,
-                ),
-                bias=None,
-                stride=1,
-                padding=0,
+        extrinsics, intrinsics = trajectory_fn(t)
+        size = self.get_scaled_size(self.scale_factor, batch["context"]["image"].shape[-2:])
+
+        # TODO: Interpolate near and far planes?
+        near = repeat(batch["context"]["near"][:, 0], "b -> b v", v=num_frames)
+        far = repeat(batch["context"]["far"][:, 0], "b -> b v", v=num_frames)
+
+        output_prob = self.decoder.forward(
+            gaussians_prob.sample() if self.variational in ("gaussians", "none") else gaussians_prob.flatten(),
+            extrinsics, intrinsics, near, far, size, "depth"
+        )
+        output_det = self.decoder.forward(
+            gaussians_det.mode() if self.variational in ("gaussians", "none") else gaussians_prob.flatten(),
+            extrinsics, intrinsics, near, far, size, "depth"
+        )
+        latent_prob = output_prob.feature_posterior.sample()
+        latent_det = output_prob.feature_posterior.mode()
+
+
+        latents = torch.cat((latent_prob, latent_det))
+        # Invert supersampling
+        z = self.rescale(latents, Fraction(1, self.supersampling_factor))
+        if self.autoencoder.expects_skip:
+            if self.autoencoder.expects_skip_extra:
+                colors = torch.cat((output_prob.color, output_det.color))
+                skip_z = torch.cat((colors, latents), dim=-3)   # -3 = channel dimension
+            else:
+                skip_z = latents
+        else:
+            skip_z = None
+        dec = self.autoencoder.decode(z, skip_z)
+
+        image_prob, image_det = dec.tensor_split(2)
+        pred = {}
+        for mode, output, images in zip(("probabilistic", "deterministic"), (output_prob, output_det), (image_prob, image_det)):
+            masks = repeat(self.rescale(output.mask, get_inv(self.scale_factor))[0].unsqueeze(1), "v () h w -> v c h w", c=3)
+            depths = apply_depth_color_map(self.rescale(output.depth, get_inv(self.scale_factor))[0])
+            pred[mode] = [vcat(image, mask, depth) for image, mask, depth in zip(images[0], masks, depths)]
+
+        images = [
+            add_border(
+                hcat(
+                    add_label(image_prob, "Probabilistic"),
+                    add_label(image_det, "Deterministic"),
+                )
             )
+            for image_prob, image_det in zip(pred["probabilistic"], pred["deterministic"])
+        ]
 
-        skip_z = (
-            torch.cat((output.color.detach(), latent_sample), dim=-3)
-            if self.autoencoder.expects_skip_extra
-            else latent_sample
-        ) if self.autoencoder.expects_skip else None
+        video = torch.stack(images)
+        video = (video.clip(min=0, max=1) * 255).type(torch.uint8).cpu().numpy()
+        if loop_reverse:
+            video = pack([video, video[::-1][1:-1]], "* c h w")[0]
+        visualizations = {
+            f"video/{name}": wandb.Video(video[None], fps=30, format="mp4")
+        }
 
-        # 2. 后续插值、解码保持原逻辑
-        spatial_ndim = z.ndim - 2
-        spatial = z.shape[-spatial_ndim:]
-        target_spatial = tuple(round(s * 4) for s in spatial)
-        mode = "trilinear" if spatial_ndim == 3 else "bilinear"
+        # Since the PyTorch Lightning doesn't support video logging, log to wandb directly.
+        try:
+            wandb.log(visualizations)
+        except Exception:
+            assert isinstance(self.logger, LocalLogger)
+            for key, value in visualizations.items():
+                tensor = value._prepare_video(value.data)
+                clip = mpy.ImageSequenceClip(list(tensor), fps=value._fps)
+                dir = LOG_PATH / key
+                dir.mkdir(exist_ok=True, parents=True)
+                clip.write_videofile(
+                    str(dir / f"{self.step_tracker.get_step():0>6}.mp4"), logger=None
+                )
 
-        z_big = torch.nn.functional.interpolate(
-            z, size=target_spatial, mode=mode, align_corners=False
+    @staticmethod
+    def get_optimizer(
+        optimizer_cfg: GeneratorOptimizerCfg | DiscriminatorOptimizerCfg,
+        params: Iterator[Parameter] | list[Dict[str, Any]],
+        lr: float
+    ) -> optim.Optimizer:
+        return getattr(optim, optimizer_cfg.name)(
+            params,
+            lr=lr,
+            **(optimizer_cfg.kwargs if optimizer_cfg.kwargs is not None else {})       
         )
-        print("z_big.shape:", z_big.shape)
-        if skip_z is None:
-            torch.cuda.empty_cache()
-            # 5 维已压成 4 维 (B,V,C,H,W)
-            b, v, c, h, w = z_big.shape
-            tile = self.cfg.test.decode_tile          # 读配置
-            if tile <= 0 or h <= tile and w <= tile:  # 整图模式（A100）
-                with torch.no_grad():
-                    target_pred_big = self.autoencoder.decode(z_big, None).sample
-            else:                                       # 分块模式（小卡）
-                target_pred_big = torch.zeros_like(z_big[:, :, :3])
-                for i in range(0, h, tile):
-                    for j in range(0, w, tile):
-                        z_tile = z_big[:, :, :, i:i+tile, j:j+tile]
-                        with torch.no_grad():
-                            pred_tile = self.autoencoder.decode(z_tile, None).sample
-                        target_pred_big[:, :, :, i:i+tile, j:j+tile] = pred_tile
-                        del pred_tile
-                torch.cuda.empty_cache()
 
-        # 3. 提亮
-        target_pred_image = (target_pred_image - target_pred_image.min()).clamp_min(0) / \
-                            (target_pred_image.max() - target_pred_image.min()).clamp_min(1e-5)
+    @staticmethod
+    def get_lr_scheduler(
+        opt: optim.Optimizer, 
+        lr_scheduler_cfg: LRSchedulerCfg
+    ) -> optim.lr_scheduler.LRScheduler:
+        return getattr(optim.lr_scheduler, lr_scheduler_cfg.name)(
+            opt,
+            **(lr_scheduler_cfg.kwargs if lr_scheduler_cfg.kwargs is not None else {})     
+        )
 
-        # ---------- 4. 保存 ----------
-        (scene,) = batch["scene"]
-        context_index_str = "_".join(map(str, sorted(batch["context"]["index"][0].tolist())))
-        path = Path(self.test_cfg.output_path) / "debug" / scene / context_index_str / "color"
-        path.mkdir(parents=True, exist_ok=True)
-        for index, color in zip(batch["target"]["index"][0], target_pred_image[0]):
-            save_image(color, path / f"{index:0>6}.png")
-
-    def on_test_end(self) -> None:
-        name = get_cfg()["wandb"]["name"]
-        self.benchmarker.dump(self.test_cfg.output_path / name / "benchmark.json")
-        self.benchmarker.dump_memory(self.test_cfg.output_path / name / "peak_memory.json")
+    def configure_optimizers(self):
+        optimizers = []
+        schedulers = []
+        # Generator optimizer
+        g_opt = self.get_optimizer(
+            self.optimizer_cfg.generator,
+            [
+                {"params": chain(self.encoder.parameters(), self.decoder.parameters())},
+                {"params": self.autoencoder.parameters(), "lr": self.autoencoder_lr} \
+                    | (self.optimizer_cfg.generator.autoencoder_kwargs if self.optimizer_cfg.generator.autoencoder_kwargs is not None else {})
+            ],
+            self.generator_lr
+        )
+        optimizers.append(g_opt)
+        # Generator scheduler
+        if self.optimizer_cfg.generator.scheduler is not None:
+            schedulers.append(self.get_lr_scheduler(g_opt, self.optimizer_cfg.generator.scheduler))
+        
+        # Discriminator optimizer
+        if self.discriminator is not None:
+            d_opt = self.get_optimizer(self.optimizer_cfg.discriminator, self.discriminator.parameters(), self.discriminator_lr)
+            optimizers.append(d_opt)
+            # Discriminator scheduler
+            if self.optimizer_cfg.discriminator.scheduler is not None:
+                schedulers.append(self.get_lr_scheduler(d_opt, self.optimizer_cfg.discriminator.scheduler))
+        
+        return optimizers, schedulers

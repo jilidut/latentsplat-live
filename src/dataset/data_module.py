@@ -54,6 +54,7 @@ def worker_init_fn(worker_id: int) -> None:
     random.seed(int(torch.utils.data.get_worker_info().seed) % (2**32 - 1))
     np.random.seed(int(torch.utils.data.get_worker_info().seed) % (2**32 - 1))
 
+
 class DataModule(LightningDataModule):
     dataset_cfg: DatasetCfg
     data_loader_cfg: DataLoaderCfg
@@ -72,9 +73,6 @@ class DataModule(LightningDataModule):
         self.data_loader_cfg = data_loader_cfg
         self.step_tracker = step_tracker
         self.dataset_shim = dataset_shim
-
-        # src/model/model_wrapper.py 或 datamodule 的 __init__
-        print("[DEBUG] val num_workers =", self.data_loader_cfg.val.num_workers)
 
     def get_persistent(self, loader_cfg: DataLoaderStageCfg) -> bool | None:
         return None if loader_cfg.num_workers == 0 else loader_cfg.persistent_workers

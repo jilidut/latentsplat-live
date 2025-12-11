@@ -1,7 +1,8 @@
+# src/model/autoencoder/autoencoder_kl.py
 from dataclasses import dataclass
 import os
 from typing import Literal, Optional, Union
-# type: ignore
+
 from diffusers import (
     AutoencoderKL as Model,
 )
@@ -55,16 +56,23 @@ class AutoencoderKL(Autoencoder[AutoencoderKLCfg]):
             latent_channels=self.cfg.latent_channels,
             sample_size=sample_size
         )
+        # if self.cfg.pretrained:
+        #     state_dict = torch.load(os.path.join(PRETRAINED_AUTOENCODER_PATH, self.cfg.model + ".pt"), map_location="cpu")
+        #     self.model.load_state_dict(state_dict)
         if self.cfg.pretrained:
-            # state_dict = torch.load(os.path.join(PRETRAINED_AUTOENCODER_PATH, self.cfg.model + ".pt"), map_location="cpu")
-            state_dict = torch.load(os.path.join(PRETRAINED_AUTOENCODER_PATH, self.cfg.model + "_pure.pt"), map_location="cpu")
-            # self.model.load_state_dict(state_dict)
-            # Lightning checkpoint -> 纯模型权重
-            if 'state_dict' in state_dict:
-                state_dict = state_dict['state_dict']
-            # 去掉前缀 "model."
-            new_state_dict = {k[6:]: v for k, v in state_dict.items() if k.startswith('model.')}
+            # ==== 1. 支持 Lightning 全量 ckpt ====
+            state_dict = torch.load(
+                os.path.join(PRETRAINED_AUTOENCODER_PATH, self.cfg.model + "_pure.pt"),
+                map_location="cpu",
+            )
+            # 若外层是 Lightning 格式，先提取权重
+            if "state_dict" in state_dict:
+                state_dict = state_dict["state_dict"]
+            # 去掉可能的前缀 "model."
+            new_state_dict = {k[6:]: v for k, v in state_dict.items() if k.startswith("model.")}
+            # ==== 2. 允许 buffer 或键缺失 ====
             self.model.load_state_dict(new_state_dict, strict=False)
+            
         if self.cfg.skip_connections:
             # Add zero convs for high-resolution skip connections
             self.d_skip = self.d_latent
@@ -79,11 +87,6 @@ class AutoencoderKL(Autoencoder[AutoencoderKLCfg]):
                 if self.cfg.skip_zero:
                     skip = zero_module(skip)
                 self.skip_convs.append(skip)
-                    # -------- 通道投射 --------
-        self.latent_proj = nn.Conv2d(16, self.cfg.latent_channels, 1, bias=False)
-        # 随机初始化后设为 buffer，不让它参与 strict 检查
-        self.register_buffer("latent_proj_weight", torch.randn(self.cfg.latent_channels, 16, 1, 1))
-        del self.latent_proj  # 删除普通 nn.Conv2d，避免重复
         
     def encode(
         self, 
@@ -182,14 +185,6 @@ class AutoencoderKL(Autoencoder[AutoencoderKLCfg]):
         z: Float[Tensor, "*#batch d_latent latent_height latent_width"],
         skip_z: Optional[Float[Tensor, "*#batch d_skip height width"]] = None,
     ) -> Float[Tensor, "*#batch d_img height width"]:
-       #
-       if z.shape[-3] != self.cfg.latent_channels:
-        z = torch.nn.functional.conv2d(
-            z.flatten(0, -4),
-            weight=self.latent_proj_weight,
-            bias=None,
-        ).unflatten(0, z.shape[:-3])
-
         batch_dims = z.shape[:-3]
         z = z.flatten(0, -4)
         if skip_z is not None:
@@ -208,10 +203,6 @@ class AutoencoderKL(Autoencoder[AutoencoderKLCfg]):
         return self.cfg.latent_channels
     
     @property
-    def latent_channels(self) -> int:
-        return self.cfg.latent_channels
-    
-    @property
     def last_layer_weights(self) -> Tensor:
         return self.model.decoder.conv_out.weight
 
@@ -222,7 +213,3 @@ class AutoencoderKL(Autoencoder[AutoencoderKLCfg]):
     @property
     def expects_skip_extra(self) -> bool:
         return self.cfg.skip_extra
-    
-    # def load_state_dict(self, state_dict, strict=True):
-    #     # 允许缺失 latent_proj_weight 等新增 buffer
-    #     super().load_state_dict(state_dict, strict=False)

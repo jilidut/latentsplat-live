@@ -7,13 +7,22 @@ import torch
 from torch import Tensor, nn
 
 from ..model.types import Prediction, GroundTruth
-
-
+#新增
+from dataclasses import dataclass, field
+from typing import Any
+#新增
 @dataclass
 class LossCfg:
     name: str
     weight: float | int = 1
     apply_after_step: int = 0
+    #新增
+    temperature: float = 0.1
+    sample_k: int = 2048
+    chunk_size: int = 1024
+    
+    extra: dict[str, Any] = field(default_factory=dict)
+    #新增
 
 
 @dataclass

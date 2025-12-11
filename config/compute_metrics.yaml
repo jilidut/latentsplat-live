@@ -1,3 +1,4 @@
+#config/compute_metrics.yaml
 defaults:
   - dataset: re10k
   - model/encoder: epipolar
@@ -23,3 +24,9 @@ data_loader:
     seed: 3456
 
 seed: 111123
+
+
+
+
+
+

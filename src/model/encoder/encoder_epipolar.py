@@ -1,10 +1,7 @@
-# src/model/encoder/encoder_epipolar.py
-
 from dataclasses import dataclass
 from fractions import Fraction
 from typing import Literal, Optional
 
-# import torch.nn.functional as F
 import torch
 from einops import rearrange
 from jaxtyping import Float
@@ -50,7 +47,6 @@ class EncoderEpipolarCfg:
     use_epipolar_transformer: bool
     use_transmittance: bool
 
-
 class EncoderEpipolar(Encoder[EncoderEpipolarCfg]):
     backbone: Backbone
     backbone_projection: nn.Sequential
@@ -61,17 +57,20 @@ class EncoderEpipolar(Encoder[EncoderEpipolarCfg]):
     high_resolution_skip: nn.Sequential
 
     def __init__(
-        self, 
-        cfg: EncoderEpipolarCfg, 
+        self,
+        cfg: EncoderEpipolarCfg,
         d_in: int,
         n_feature_channels: int,
         scale_factor: Fraction,
-        variational: bool
-    ) -> None:
-        super().__init__(cfg, variational)
-        # scale_factor = Fraction(1, 1)
-        print(f"[EncoderEpipolar] cfg.num_surfaces = {cfg.num_surfaces}")
+        variational: bool,
+        #新增
+        gsu_loss_cfg: dict | None = None, 
 
+    ) -> None:
+        #新增
+        self.gsu_loss_cfg = gsu_loss_cfg  
+
+        super().__init__(cfg, variational)
         self.backbone = get_backbone(cfg.backbone, d_in, cfg.d_backbone, scale_factor)
         self.backbone_projection = nn.Sequential(
             nn.ReLU(),
@@ -90,10 +89,9 @@ class EncoderEpipolar(Encoder[EncoderEpipolarCfg]):
             cfg.num_surfaces,
             cfg.use_transmittance,
         )
-        print("[DepthPredictor] num_samples =", cfg.num_monocular_samples)
         self.gaussian_adapter = GaussianAdapter(
-            cfg.gaussian_adapter, 
-            2 * n_feature_channels if variational else n_feature_channels   # NOTE double the number of features in case of variational
+            cfg.gaussian_adapter,
+            2 * n_feature_channels if variational else n_feature_channels,  # NOTE double the number of features in case of variational
         )
         if cfg.predict_opacity:
             self.to_opacity = nn.Sequential(
@@ -108,10 +106,21 @@ class EncoderEpipolar(Encoder[EncoderEpipolarCfg]):
                 cfg.num_surfaces * (2 + self.gaussian_adapter.d_in),
             ),
         )
-        print(f"[EncoderEpipolar] num_surfaces={cfg.num_surfaces}, adapter.d_in={self.gaussian_adapter.d_in}, total={cfg.num_surfaces * (2 + self.gaussian_adapter.d_in)}")
+
+        # 新增-----------------------------
+        # 将两条独立的 MLP 明确分开
+        self.to_feature_harmonics = nn.Sequential(
+            nn.ReLU(),
+            nn.Linear(cfg.d_feature, 27),
+        )
+        self.to_gaussian_latent = nn.Sequential(
+            nn.ReLU(),
+            nn.Linear(cfg.d_feature, cfg.num_surfaces * 65), 
+        )
+        # 新增-----------------------------
 
         if scale_factor == 1:
-            # High resolution skip only required in case of now downscaling
+            # High resolution skip only required in case of no downscaling
             self.high_resolution_skip = nn.Sequential(
                 nn.Conv2d(3, cfg.d_feature, 7, 1, 3),
                 nn.ReLU(),
@@ -129,7 +138,7 @@ class EncoderEpipolar(Encoder[EncoderEpipolarCfg]):
         # Figure out the exponent.
         cfg = self.cfg.opacity_mapping
         x = cfg.initial + min(global_step / cfg.warm_up, 1) * (cfg.final - cfg.initial)
-        exponent = 2**x
+        exponent = 2 ** x
 
         # Map the probability density to an opacity.
         return 0.5 * (1 - (1 - pdf) ** exponent + pdf ** (1 / exponent))
@@ -142,7 +151,6 @@ class EncoderEpipolar(Encoder[EncoderEpipolarCfg]):
         deterministic: bool = False,
         visualization_dump: Optional[dict] = None,
     ) -> VariationalGaussians:
-        print("[Encoder] features input shape =", features.shape if features is not None else "None")
         b, v = context["image"].shape[:2]
         if features is None:
             # Encode the context images from scratch
@@ -150,12 +158,10 @@ class EncoderEpipolar(Encoder[EncoderEpipolarCfg]):
         features = self.backbone(features)
         device = features.device
         h, w = features.shape[-2:]
-        print(">>> actual (h, w):", h, w)
         features = rearrange(features, "(b v) c h w -> b v h w c", b=b, v=v)
         features = self.backbone_projection(features)
         features = rearrange(features, "b v h w c -> b v c h w")
-        print("image shape:", context["image"].shape)
-        print("features after backbone:", features.shape)
+
         # Run the epipolar transformer.
         if self.cfg.use_epipolar_transformer:
             features, sampling = self.epipolar_transformer(
@@ -181,7 +187,7 @@ class EncoderEpipolar(Encoder[EncoderEpipolarCfg]):
             deterministic,
             1 if deterministic else self.cfg.gaussians_per_pixel,
         )
-        print("features before to_gaussians:", features.shape)
+
         # Convert the features and depths into Gaussians.
         xy_ray, _ = sample_image_grid((h, w), device)
         xy_ray = rearrange(xy_ray, "h w xy -> (h w) () xy")
@@ -190,13 +196,9 @@ class EncoderEpipolar(Encoder[EncoderEpipolarCfg]):
             "... (srf c) -> ... srf c",
             srf=self.cfg.num_surfaces,
         )
-        print(">>> xy_ray.shape:", xy_ray.shape)
-        print("gaussians shape:", gaussians.shape)
         offset_xy = gaussians[..., :2].sigmoid()
-        print("offset_xy shape:", offset_xy.shape)
         pixel_size = 1 / torch.tensor((w, h), dtype=torch.float32, device=device)
         xy_ray = xy_ray + (offset_xy - 0.5) * pixel_size
-        
         gpp = self.cfg.gaussians_per_pixel
         gaussians = self.gaussian_adapter.forward(
             rearrange(context["extrinsics"], "b v i j -> b v () () () i j"),
@@ -208,6 +210,44 @@ class EncoderEpipolar(Encoder[EncoderEpipolarCfg]):
             (h, w),
         )
 
+        # 新增-------------------
+        _sh_raw = self.to_feature_harmonics(features)
+        sh_features_srf = _sh_raw.unsqueeze(3).expand(-1, -1, -1, self.cfg.num_surfaces, -1)
+        sh_features_spp = sh_features_srf.unsqueeze(4).repeat(1, 1, 1, 1, gpp, 1)
+        sh_mean_4d = rearrange(
+            sh_features_spp,
+            "b v r srf spp (c d) -> b (v r srf spp) c d", c=3, d=9
+        )
+
+        # 创建特征谐波分布对象 - 注意 dim=-2 参考原始代码
+        sh_logv = torch.zeros_like(sh_mean_4d)
+        # 创建正确的分布参数
+        sh_params = torch.cat([sh_mean_4d, sh_logv], dim=-1)  # [B, N, 3, 18]
+
+        # 创建分布，dim=-2 表示在 channels 维度（dim=2）建模
+        sh_dist = DiagonalGaussianDistribution(sh_params, dim=-2)
+
+        # 检查 mode() 返回的形状
+        print(f"sh_dist.mode() shape: {sh_dist.mode().shape}")
+        # 应该返回 [B, N, 3, 9] 而不是 [B, N, 3, 18]
+
+        # GSU latent 部分
+        feat_5d = rearrange(
+            self.to_gaussian_latent(features),
+            "b v r (srf c) -> b v r srf c",
+            srf=self.cfg.num_surfaces,
+        )
+        # 简化：总是用65维
+        gsu_latent_raw = feat_5d[..., 0:65]
+        gsu_latent_spp = gsu_latent_raw.unsqueeze(4)
+        gsu_mean = rearrange(gsu_latent_spp, "b v r srf spp c -> b (v r srf spp) c")
+
+        # 创建 GSU latent 分布对象
+        gsu_logv = torch.zeros_like(gsu_mean)
+        gsu_params = torch.cat([gsu_mean, gsu_logv], dim=-1)
+        gsu_dist = DiagonalGaussianDistribution(gsu_params, dim=-1)
+        # 新增---------------------------------------
+        
         # Dump visualizations if needed.
         if visualization_dump is not None:
             visualization_dump["depth"] = rearrange(
@@ -229,14 +269,14 @@ class EncoderEpipolar(Encoder[EncoderEpipolarCfg]):
             else 1
         )
 
-        gaussian_features = rearrange(
-            gaussians.feature_harmonics,
-            "b v r srf spp c d_f_sh -> b (v r srf spp) c d_f_sh",
-        )
-        gaussian_features = DiagonalGaussianDistribution(
-            **{"params" if self.variational else "mean": gaussian_features},
-            dim=-2
-        )
+        # gaussian_features = rearrange(
+        #     gaussians.feature_harmonics,
+        #     "b v r srf spp c d_f_sh -> b (v r srf spp) c d_f_sh",
+        # )
+        # gaussian_features = DiagonalGaussianDistribution(
+        #     **{"params" if self.variational else "mean": gaussian_features},
+        #     dim=-2
+        # )
         return VariationalGaussians(
             rearrange(
                 gaussians.means,
@@ -253,8 +293,9 @@ class EncoderEpipolar(Encoder[EncoderEpipolarCfg]):
             rearrange(
                 gaussians.color_harmonics,
                 "b v r srf spp c d_c_sh -> b (v r srf spp) c d_c_sh",
-            ),
-            gaussian_features,
+            ),  
+            feature_harmonics = sh_dist,                       
+            gaussian_latent = gsu_dist,
         )
 
     def get_data_shim(self) -> DataShim:

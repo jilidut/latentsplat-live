@@ -25,7 +25,6 @@ class EpipolarSampling:
     xy_sample_far: Float[Tensor, "batch view other_view ray sample 2"]
     origins: Float[Tensor, "batch view ray 3"]
     directions: Float[Tensor, "batch view ray 3"]
-    depths: Float[Tensor, "batch view other_view ray sample"] 
 
 
 class EpipolarSampler(nn.Module):
@@ -76,59 +75,26 @@ class EpipolarSampler(nn.Module):
             rearrange(far, "b v -> b v () ()"),
         )
 
+
         # Generate sample points.
         s = self.num_samples
         sample_depth = (torch.arange(s, device=device) + 0.5) / s
-        # sample_depth = rearrange(sample_depth, "s -> s ()")
+        sample_depth = rearrange(sample_depth, "s -> s ()")
         xy_min = projection["xy_min"].nan_to_num(posinf=0, neginf=0) 
         xy_min = xy_min * projection["overlaps_image"][..., None]
         xy_min = rearrange(xy_min, "b v ov r xy -> b v ov r () xy")
         xy_max = projection["xy_max"].nan_to_num(posinf=0, neginf=0) 
         xy_max = xy_max * projection["overlaps_image"][..., None]
         xy_max = rearrange(xy_max, "b v ov r xy -> b v ov r () xy")
-        sample_depth = sample_depth.view(1, 1, 1, 1, s, 1)   
         xy_sample = xy_min + sample_depth * (xy_max - xy_min)
 
-                # ---------- ① 补齐射线数到整张图，保证后面 reshape 不崩 ----------
-        _, _, _, r_all = projection["overlaps_image"].shape   # 当前有效射线数
-        h, w = images.shape[-2:]                               # 原图高宽
-        r_needed = h * w                                       # 目标射线数 = 整张图
-        if r_all != r_needed:
-            # 1. 把 mask 补成 True
-            flat_mask = projection["overlaps_image"].reshape(-1)          # (B*V*OV*R,)
-            n_pad = r_needed - r_all
-            # 随机挑 n_pad 条已有射线做复制（避免全 0）
-            idx_true = torch.where(flat_mask)[0]
-            pad_idx = idx_true[torch.randint(len(idx_true), (n_pad,), device=idx_true.device)]
-            flat_mask = torch.cat([flat_mask, flat_mask[pad_idx]])        # 补 True
-            projection["overlaps_image"] = flat_mask.reshape(b, v, v-1, r_needed)
-
-            # 2. 把 xy_sample 补到同样长度
-            flat_xy = xy_sample.reshape(-1, s, 2)                         # (N, 484, 2)
-            pad_xy = flat_xy[pad_idx]                                     # 复制同样条数
-            flat_xy = torch.cat([flat_xy, pad_xy], 0)                     # (N+n_pad, 484, 2)
-            xy_sample = flat_xy.reshape(b, v, v-1, r_needed, s, 2)       # 现在长度对齐了
-        # ----------------------------------------------------------
-
-        # ---------- ② 无效射线对应的样本直接置 0 ----------
-        xy_sample = xy_sample * projection["overlaps_image"][..., None, None]
-
-        # 2. 提前保护：没有有效样本直接返回空张量
-        if projection["overlaps_image"].sum() == 0:
-            b, v, c, h, w = images.shape
-            r = h * w                                      # 射线数 = 整张图
-            s = self.num_samples
-            return EpipolarSampling(
-                features=images.new_zeros(b, v, v-1, r, s, c),
-                valid=projection["overlaps_image"],          # 全 False
-                xy_ray=xy_ray,
-                xy_sample=xy_sample.new_zeros(b, v, v-1, r, s, 2),
-                xy_sample_near=xy_sample.new_zeros(b, v, v-1, r, s, 2),
-                xy_sample_far=xy_sample.new_zeros(b, v, v-1, r, s, 2),
-                origins=origins,
-                directions=directions,
-            )
-
+        # The samples' shape is (batch, view, other_view, ...). However, before the
+        # transpose, the view dimension refers to the view from which the ray is cast,
+        # not the view from which samples are drawn. Thus, we need to transpose the
+        # samples so that the view dimension refers to the view from which samples are
+        # drawn. If the diagonal weren't removed for efficiency, this would be a literal
+        # transpose. In our case, it's as if the diagonal were re-added, the transpose
+        # were taken, and the diagonal were then removed again.
         samples = self.transpose(xy_sample)
         samples = F.grid_sample(
             rearrange(images, "b v c h w -> (b v) c h w"),
@@ -137,20 +103,10 @@ class EpipolarSampler(nn.Module):
             padding_mode="zeros",
             align_corners=False,
         )
-
-
         samples = rearrange(
             samples, "(b v) c (ov r s) () -> b v ov r s c", b=b, v=v, ov=v - 1, s=s
         )
-        samples = self.transpose(samples)          # (B, V, OV, R, S, C)
-        # ---------- 构造 depths ----------
-        b, v, ov, r, s, c = samples.shape
-        depths = sample_depth.view(1, 1, 1, 1, s, 1).expand(b, v, ov, r, -1, 1).squeeze(-1)
-
-
-        print("[EpipolarSampler] samples.shape:", samples.shape)
-        print("[EpipolarSampler] r_needed:", h * w)
-        print("[EpipolarSampler] r_all after pad:", samples.shape[3])
+        samples = self.transpose(samples)
 
         # Zero out invalid samples.
         samples = samples * projection["overlaps_image"][..., None, None]
@@ -165,7 +121,6 @@ class EpipolarSampler(nn.Module):
             xy_sample_far=xy_min + (sample_depth + half_span) * (xy_max - xy_min),
             origins=origins,
             directions=directions,
-            depths=depths,   
         )
 
     def generate_image_rays(

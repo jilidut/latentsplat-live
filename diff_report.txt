@@ -1,0 +1,2909 @@
+Only in modified/: acid_subset
+diff -r original/config/dataset/re10k.yaml modified/config/dataset/re10k.yaml
+5c5,8
+< roots: [datasets/re10k]
+---
+> roots: ["/home/jilidut/download/file/latentsplat/latentsplat-main/datasets/re10k"]
+> skip_missing: false
+> strict: false
+> allow_empty: false
+8,9c11
+< 
+< image_shape: [256, 256] # [180, 320]
+---
+> image_shape: [180,180]
+12,13c14
+< 
+< baseline_epsilon: 1e-3
+---
+> baseline_epsilon: 1.0e-3
+14a16,26
+> 
+> # 3060 提速设置
+> trainer:
+>   precision: 16-mixed
+>   accumulate_grad_batches: 4
+>   check_val_every_n_epoch: 5
+> 
+> data_loader:
+>   train:
+>     num_workers: 8
+>     pin_memory: true
+\ No newline at end of file
+Only in modified/config/dataset: train
+Only in modified/config/experiment: speed3060.yaml
+diff -r original/config/main.yaml modified/config/main.yaml
+0a1
+> # config/main.yaml
+7a9,11
+>   - experiment: speed3060 
+>   - _self_
+> 
+10,12d13
+<   autoencoder:
+<     skip_connections: false
+<   encode_latents: false
+14c15,34
+<   variational: none
+---
+>   encode_latents: false
+>   encoder:
+>     epipolar:
+>       num_samples: 196          
+>     epipolar_transformer:       
+>       num_context_views: 2
+>       num_samples: 484
+>       num_layers: 1
+>       num_heads: 4
+>       downscale: 4
+>       d_dot: 128
+>       d_mlp: 256
+>       self_attention:
+>         patch_size: 4
+>         num_octaves: 10
+>         num_layers: 1
+>         num_heads: 4
+>         d_token: 128
+>         d_dot: 128
+>         d_mlp: 256
+22,33d41
+< loss:
+<   gaussian: null
+<   context: null
+< #    nll: []
+< #    generator: ...
+< #    discriminator: ...
+<   target:
+<     autoencoder: null
+<     render:
+<       latent: null
+<       image: null
+<     combined: null
+52d59
+<   # Avoid having to spin up new processes to print out visualizations.
+64c71
+<     num_workers: 1
+---
+>     num_workers: 4
+72c79
+<     autoencoder_lr: 9.0e-6 # orig 4.5e-6 but doubled because of 2 context views
+---
+>     autoencoder_lr: 9.0e-6 
+86c93
+<     lr: 9.0e-6 # orig 4.5e-6 but doubled because of 2 context views
+---
+>     lr: 9.0e-6 
+105a113,115
+>   num_rays: 64
+>   num_points_per_ray: 64
+>   decode_tile: 64
+108a119,125
+> datamodule:
+>   batch_size: 20          
+>   num_workers: 4          
+>   pin_memory: true
+>   base_resolution: 128
+>   resolution_anneal: true
+> 
+110,111c127,159
+<   max_steps: 200_001
+<   val_check_interval: 250
+---
+>   accelerator: gpu
+>   devices: 1
+>   # precision: bf16-mixed   
+>   precision: 16
+>   max_steps: 200
+>   val_check_interval: 5000
+>   log_every_n_steps: 200
+>   strategy: auto
+>   # accumulate_grad_batches: 1
+>   gradient_clip_val: null   
+>   device: cuda 
+> 
+>   logger:
+>     _target_: pytorch_lightning.loggers.TensorBoardLogger
+>     save_dir: outputs/tensorboard
+> 
+> generate_gif: false
+> gif_interval: 25000  
+> 
+> 
+> loss:
+>   gaussian:
+>     nll:
+>       - name: l1
+>         weight: 1.0
+>         apply_after_step: 0
+>   target:
+>     render:
+>       image:          # ← 必须显式声明 image
+>         nll:
+>           - name: l1
+>             weight: 1.0
+>             apply_after_step: 0
+diff -r original/config/model/encoder/epipolar.yaml modified/config/model/encoder/epipolar.yaml
+39c39
+<   num_samples: 32
+---
+>   num_samples: 484
+45c45
+<   num_samples: 8
+---
+>   num_samples: 484
+59c59
+< use_transmittance: false
+---
+> use_transmittance: false
+\ No newline at end of file
+Only in modified/: configs
+Only in modified/: demo_out
+Only in modified/: demo.png
+Only in modified/: extract_vae.py
+Only in modified/: former.test_num_points_per_ray=64hGUmodel.encoder.epipolar_transformer.test_num_points_per_ray=64uBEmodel.encoder.epipolar_transformer.test_num_points_per_ray=64nD[ks=3, index=41
+Only in modified/: from
+diff -r original/.git/config modified/.git/config
+7c7
+< 	url = https://github.com/Chrixtar/latentsplat.git
+---
+> 	url = https://github.com/jilidut/latentsplat-live.git
+Binary files original/.git/index and modified/.git/index differ
+diff -r original/.git/logs/HEAD modified/.git/logs/HEAD
+1c1
+< 0000000000000000000000000000000000000000 cd910b4910cb8022917f86a84e41323fb08d3289 gengqt <2831143981@qq.com> 1759913039 +0800	clone: from https://github.com/Chrixtar/latentsplat.git
+---
+> 0000000000000000000000000000000000000000 362f8d8807c8ee28677fbfb82a7d7e3194fcd50b gengqt <2831143981@qq.com> 1759913103 +0800	clone: from https://github.com/jilidut/latentsplat-live.git
+diff -r original/.git/logs/refs/heads/main modified/.git/logs/refs/heads/main
+1c1
+< 0000000000000000000000000000000000000000 cd910b4910cb8022917f86a84e41323fb08d3289 gengqt <2831143981@qq.com> 1759913039 +0800	clone: from https://github.com/Chrixtar/latentsplat.git
+---
+> 0000000000000000000000000000000000000000 362f8d8807c8ee28677fbfb82a7d7e3194fcd50b gengqt <2831143981@qq.com> 1759913103 +0800	clone: from https://github.com/jilidut/latentsplat-live.git
+diff -r original/.git/logs/refs/remotes/origin/HEAD modified/.git/logs/refs/remotes/origin/HEAD
+1c1
+< 0000000000000000000000000000000000000000 cd910b4910cb8022917f86a84e41323fb08d3289 gengqt <2831143981@qq.com> 1759913039 +0800	clone: from https://github.com/Chrixtar/latentsplat.git
+---
+> 0000000000000000000000000000000000000000 362f8d8807c8ee28677fbfb82a7d7e3194fcd50b gengqt <2831143981@qq.com> 1759913103 +0800	clone: from https://github.com/jilidut/latentsplat-live.git
+Only in original/.git/objects/pack: pack-3b08638a55172366c3e404bdb9f44c94079804bf.idx
+Only in original/.git/objects/pack: pack-3b08638a55172366c3e404bdb9f44c94079804bf.pack
+Only in original/.git/objects/pack: pack-3b08638a55172366c3e404bdb9f44c94079804bf.rev
+Only in modified/.git/objects/pack: pack-fd33a3719251d0aad6c1c51e05d694df20ee855b.idx
+Only in modified/.git/objects/pack: pack-fd33a3719251d0aad6c1c51e05d694df20ee855b.pack
+Only in modified/.git/objects/pack: pack-fd33a3719251d0aad6c1c51e05d694df20ee855b.rev
+diff -r original/.git/packed-refs modified/.git/packed-refs
+2,3c2,4
+< cd910b4910cb8022917f86a84e41323fb08d3289 refs/remotes/origin/main
+< 2404699e7b88c8b455de0b76fb1d18225ecd6738 refs/tags/v1.0.0
+---
+> 179629d090c2fc12251be605f92aaf2d8c833848 refs/remotes/origin/dev-a100
+> 362f8d8807c8ee28677fbfb82a7d7e3194fcd50b refs/remotes/origin/main
+> 362f8d8807c8ee28677fbfb82a7d7e3194fcd50b refs/tags/v0.1-a100
+diff -r original/.git/refs/heads/main modified/.git/refs/heads/main
+1c1
+< cd910b4910cb8022917f86a84e41323fb08d3289
+---
+> 362f8d8807c8ee28677fbfb82a7d7e3194fcd50b
+diff -r original/.gitignore modified/.gitignore
+178c178,191
+< /test/*
+\ No newline at end of file
+---
+> /test/*venv310/
+> *.log
+> __pycache__/
+> *.pyc
+> 
+> *.pt
+> *.pth
+> *.ckpt
+> *.zip
+> *.tar.gz
+> data/
+> logs/
+> wandb/
+> .conda/
+\ No newline at end of file
+Only in modified/: images
+Only in modified/: import
+Only in modified/: latent-gaussian-rasterization
+Only in modified/: mode=test
+Only in modified/: my_config_256.yaml
+Only in modified/: nohup.out
+Only in modified/: pid_test.txt
+Only in modified/: pid_train2x2.txt
+Only in modified/: pid_train3x3.txt
+Only in modified/: pid.txt
+Only in modified/: point_cloud_figure
+Only in modified/: quick_gif.py
+Only in modified/: re10k
+Only in modified/: re10k_subset
+diff -r original/README.md modified/README.md
+110a111
+> 
+diff -r original/requirements.txt modified/requirements.txt
+19c19
+< jaxtyping==0.2.25
+---
+> jaxtyping==0.2.19
+21c21
+< matplotlib==3.8.2
+---
+> matplotlib==3.7.4
+27c27
+< scikit-image==0.22.0
+---
+> scikit-image==0.21.0
+34c34
+< git+https://github.com/Chrixtar/latent-gaussian-rasterization
+\ No newline at end of file
+---
+> # git+https://github.com/Chrixtar/latent-gaussian-rasterization
+Only in modified/src: callbacks
+diff -r original/src/dataset/data_module.py modified/src/dataset/data_module.py
+57d56
+< 
+75a75,77
+> 
+>         # src/model/model_wrapper.py 或 datamodule 的 __init__
+>         print("[DEBUG] val num_workers =", self.data_loader_cfg.val.num_workers)
+diff -r original/src/dataset/dataset_re10k.py modified/src/dataset/dataset_re10k.py
+0a1
+> # dataset_re10k.py  (2025-06-25 修订版)
+1a3
+> import random
+48c50
+<         force_shuffle: bool = False
+---
+>         force_shuffle: bool = False,
+57c59
+<         # Collect chunks.
+---
+>         # ---- 收集 chunk ----
+61,63c63
+<             root_chunks = sorted(
+<                 [path for path in root.iterdir() if path.suffix == ".torch"]
+<             )
+---
+>             root_chunks = sorted(p for p in root.iterdir() if p.suffix == ".torch")
+65,66c65,67
+<         if self.cfg.overfit_to_scene is not None:
+<             chunk_path = self.index[self.cfg.overfit_to_scene]
+---
+> 
+>         if cfg.overfit_to_scene is not None:
+>             chunk_path = self.index[cfg.overfit_to_scene]
+69,71c70,71
+<     def shuffle(self, lst: list) -> list:
+<         indices = torch.randperm(len(lst))
+<         return [lst[x] for x in indices]
+---
+>         print(f"[DEBUG] stage={self.stage}, data_stage={self.data_stage}")
+>         print(f"[DEBUG] chunks={len(self.chunks)}, index={len(self.index)}")
+72a73
+>     # ---------------- 迭代器 ----------------
+74,79d74
+<         # Chunks must be shuffled here (not inside __init__) for validation to show
+<         # random chunks.
+<         if self.stage in ("train", "val") or self.force_shuffle:
+<             self.chunks = self.shuffle(self.chunks)
+< 
+<         # When testing, the data loaders alternate chunks.
+81,86d75
+<         if self.stage == "test" and worker_info is not None:
+<             self.chunks = [
+<                 chunk
+<                 for chunk_index, chunk in enumerate(self.chunks)
+<                 if chunk_index % worker_info.num_workers == worker_info.id
+<             ]
+88,89c77,91
+<         for chunk_path in self.chunks:
+<             # Load the chunk.
+---
+>         # 1. 先按 worker 分片（train/val 也做，防止重复加载）
+>         if worker_info is not None:
+>             per_worker = len(self.chunks) // worker_info.num_workers
+>             worker_id = worker_info.id
+>             start = worker_id * per_worker
+>             end = None if worker_id == worker_info.num_workers - 1 else (worker_id + 1) * per_worker
+>             chunks = self.chunks[start:end]
+>         else:
+>             chunks = self.chunks
+> 
+>         # 2. 打乱
+>         if self.stage in ("train", "val") or self.force_shuffle:
+>             chunks = random.sample(chunks, k=len(chunks))
+> 
+>         for chunk_path in chunks:
+98c100
+<                 chunk = self.shuffle(chunk)
+---
+>                 chunk = random.sample(chunk, k=len(chunk))
+105d106
+<                 # Skip the example if the field of view is too wide.
+112d112
+<                     # Skip because the example doesn't have enough frames.
+114c114
+<                 
+---
+> 
+116c116,122
+<                     context_indices, target_indices = view_index.context, view_index.target
+---
+>                     ctx_idx, tgt_idx = view_index.context, view_index.target
+> 
+>                     # ---- 加载图像 ----
+>                     ctx_imgs = [example["images"][i.item()] for i in ctx_idx]
+>                     tgt_imgs = [example["images"][i.item()] for i in tgt_idx]
+>                     ctx_imgs = self._convert_images(ctx_imgs)
+>                     tgt_imgs = self._convert_images(tgt_imgs)
+118,136c124,125
+<                     # Load the images.
+<                     context_images = [
+<                         example["images"][index.item()] for index in context_indices
+<                     ]
+<                     context_images = self.convert_images(context_images)
+<                     target_images = [
+<                         example["images"][index.item()] for index in target_indices
+<                     ]
+<                     target_images = self.convert_images(target_images)
+< 
+<                     # Skip the example if the images don't have the right shape.
+<                     context_image_invalid = context_images.shape[1:] != (3, 360, 640)
+<                     target_image_invalid = target_images.shape[1:] != (3, 360, 640)
+<                     if context_image_invalid or target_image_invalid:
+<                         print(
+<                             f"Skipped bad example {example['key']}. Context shape was "
+<                             f"{context_images.shape} and target shape was "
+<                             f"{target_images.shape}."
+<                         )
+---
+>                     if ctx_imgs.shape[1:] != (3, 360, 640) or tgt_imgs.shape[1:] != (3, 360, 640):
+>                         print(f"Skip bad shape {scene}  ctx={ctx_imgs.shape}  tgt={tgt_imgs.shape}")
+139,148c128,135
+<                     # Resize the world to make the baseline 1.
+<                     context_extrinsics = extrinsics[context_indices]
+<                     if context_extrinsics.shape[0] == 2 and self.cfg.make_baseline_1:
+<                         a, b = context_extrinsics[:, :3, 3]
+<                         scale = (a - b).norm()
+<                         if scale < self.cfg.baseline_epsilon:
+<                             print(
+<                                 f"Skipped {scene} because of insufficient baseline "
+<                                 f"{scale:.6f}"
+<                             )
+---
+>                     # ----  baseline=1 归一化 ----
+>                     ctx_extr = extrinsics[ctx_idx]
+>                     scale = 1.0
+>                     if ctx_extr.shape[0] == 2 and self.cfg.make_baseline_1:
+>                         a, b = ctx_extr[:, :3, 3]
+>                         baseline = (a - b).norm()
+>                         if baseline < self.cfg.baseline_epsilon:
+>                             print(f"Skip {scene}  baseline={baseline:.4f}")
+150,152c137,138
+<                         extrinsics[:, :3, 3] /= scale
+<                     else:
+<                         scale = 1
+---
+>                         extrinsics[:, :3, 3] /= baseline
+>                         scale = baseline
+156,161c142,147
+<                             "extrinsics": extrinsics[context_indices],
+<                             "intrinsics": intrinsics[context_indices],
+<                             "image": context_images,
+<                             "near": self.get_bound("near", len(context_indices)) / scale,
+<                             "far": self.get_bound("far", len(context_indices)) / scale,
+<                             "index": context_indices,
+---
+>                             "extrinsics": extrinsics[ctx_idx],
+>                             "intrinsics": intrinsics[ctx_idx],
+>                             "image": ctx_imgs,
+>                             "near": self.get_bound("near", len(ctx_idx)) / scale,
+>                             "far": self.get_bound("far", len(ctx_idx)) / scale,
+>                             "index": ctx_idx,
+164,169c150,155
+<                             "extrinsics": extrinsics[target_indices],
+<                             "intrinsics": intrinsics[target_indices],
+<                             "image": target_images,
+<                             "near": self.get_bound("near", len(target_indices)) / scale,
+<                             "far": self.get_bound("far", len(target_indices)) / scale,
+<                             "index": target_indices,
+---
+>                             "extrinsics": extrinsics[tgt_idx],
+>                             "intrinsics": intrinsics[tgt_idx],
+>                             "image": tgt_imgs,
+>                             "near": self.get_bound("near", len(tgt_idx)) / scale,
+>                             "far": self.get_bound("far", len(tgt_idx)) / scale,
+>                             "index": tgt_idx,
+176a163
+>     # ---------------- 辅助 ----------------
+178,183c165,166
+<         self,
+<         poses: Float[Tensor, "batch 18"],
+<     ) -> tuple[
+<         Float[Tensor, "batch 4 4"],  # extrinsics
+<         Float[Tensor, "batch 3 3"],  # intrinsics
+<     ]:
+---
+>         self, poses: Float[Tensor, "batch 18"]
+>     ) -> tuple[Float[Tensor, "batch 4 4"], Float[Tensor, "batch 3 3"]]:
+185,188c168
+< 
+<         # Convert the intrinsics to a 3x3 normalized K matrix.
+<         intrinsics = torch.eye(3, dtype=torch.float32)
+<         intrinsics = repeat(intrinsics, "h w -> b h w", b=b).clone()
+---
+>         intr = torch.eye(3, dtype=torch.float32).repeat(b, 1, 1)
+190,193c170,173
+<         intrinsics[:, 0, 0] = fx
+<         intrinsics[:, 1, 1] = fy
+<         intrinsics[:, 0, 2] = cx
+<         intrinsics[:, 1, 2] = cy
+---
+>         intr[:, 0, 0] = fx
+>         intr[:, 1, 1] = fy
+>         intr[:, 0, 2] = cx
+>         intr[:, 1, 2] = cy
+195,196c175
+<         # Convert the extrinsics to a 4x4 OpenCV-style W2C matrix.
+<         w2c = repeat(torch.eye(4, dtype=torch.float32), "h w -> b h w", b=b).clone()
+---
+>         w2c = torch.eye(4, dtype=torch.float32).repeat(b, 1, 1)
+198,202c177,180
+<         return w2c.inverse(), intrinsics
+<     
+<     def convert_images(
+<         self,
+<         images: list[UInt8[Tensor, "..."]],
+---
+>         return w2c.inverse(), intr
+> 
+>     def _convert_images(
+>         self, images: list[UInt8[Tensor, "..."]]
+204,208c182
+<         torch_images = []
+<         for image in images:
+<             image = Image.open(BytesIO(image.numpy().tobytes()))
+<             torch_images.append(self.to_tensor(image))
+<         return torch.stack(torch_images)
+---
+>         return torch.stack([self.to_tensor(Image.open(BytesIO(img.numpy().tobytes()))) for img in images])
+210,214c184
+<     def get_bound(
+<         self,
+<         bound: Literal["near", "far"],
+<         num_views: int,
+<     ) -> Float[Tensor, " view"]:
+---
+>     def get_bound(self, bound: Literal["near", "far"], num_views: int) -> Float[Tensor, " view"]:
+216c186
+<         return repeat(value, "-> v", v=num_views)
+---
+>         return value.repeat(num_views)
+222,224c192
+<         if self.stage == "val":
+<             return "test"
+<         return self.stage
+---
+>         return "test" if self.stage == "val" else self.stage
+228,232c196,198
+<         merged_index = {}
+<         data_stages = [self.data_stage]
+<         if self.cfg.overfit_to_scene is not None:
+<             data_stages = ("test", "train")
+<         for data_stage in data_stages:
+---
+>         merged = {}
+>         stages = ("test", "train") if self.cfg.overfit_to_scene else (self.data_stage,)
+>         for stage in stages:
+234,244c200,207
+<                 # Load the root's index.
+<                 with (root / data_stage / "index.json").open("r") as f:
+<                     index = json.load(f)
+<                 index = {k: Path(root / data_stage / v) for k, v in index.items()}
+< 
+<                 # The constituent datasets should have unique keys.
+<                 assert not (set(merged_index.keys()) & set(index.keys()))
+< 
+<                 # Merge the root's index into the main index.
+<                 merged_index = {**merged_index, **index}
+<         return merged_index
+---
+>                 idx_file = root / stage / "index.json"
+>                 if not idx_file.exists():          # 🔥 必改：跳过不存在
+>                     continue
+>                 with idx_file.open("r") as f:
+>                     sub = {k: Path(root / stage / v) for k, v in json.load(f).items()}
+>                 assert not (merged.keys() & sub.keys()), "duplicate scene key"
+>                 merged.update(sub)
+>         return merged
+247,249c210
+<         if isinstance(self.view_sampler, ViewSamplerEvaluation):
+<             return self.view_sampler.total_samples
+<         return len(self.index.keys())
+---
+>         return self.view_sampler.total_samples if isinstance(self.view_sampler, ViewSamplerEvaluation) else len(self.index)
+\ No newline at end of file
+diff -r original/src/dataset/shims/bounds_shim.py modified/src/dataset/shims/bounds_shim.py
+48c48
+< 
+---
+>     return batch #删掉
+Only in modified/src: generate_gif_now.py
+diff -r original/src/loss/__init__.py modified/src/loss/__init__.py
+35a36,38
+>     
+>     print(f"[DEBUG] get_loss_group called: name={name}, group_cfg={group_cfg}")
+>     
+diff -r original/src/loss/loss_l1.py modified/src/loss/loss_l1.py
+14c14,15
+< 
+---
+>     weight: float = 1.0
+>     apply_after_step: int = 0
+16a18,21
+>     def __init__(self, cfg: LossL1Cfg):
+>         super().__init__(cfg)
+>         print(f"[INIT] LossL1 initialized with apply_after_step={self.cfg.apply_after_step}")
+> 
+21a27,30
+>         # delta = prediction.image - gt.image
+> 
+>         if prediction is None or gt is None:
+>             return 0.0
+diff -r original/src/loss/loss.py modified/src/loss/loss.py
+50a51,53
+>         
+>         print(f"[DEBUG] Loss '{self.name}' apply_after_step={self.cfg.apply_after_step}, global_step={global_step}")
+> 
+Only in modified/src: main copy.py
+diff -r original/src/main.py modified/src/main.py
+0a1
+> # main.py
+2a4
+> import time
+4d5
+< 
+13,14c14,17
+< from pytorch_lightning.loggers.wandb import WandbLogger
+< 
+---
+> # from pytorch_lightning.loggers.wandb import WandbLogger
+> from pytorch_lightning.loggers import TensorBoardLogger, WandbLogger
+> from src.callbacks.gif_every_n_step import GifEveryNStep
+> from src.callbacks.generate_gif import GenerateGif
+16,31c19,37
+< with install_import_hook(
+<     ("src",),
+<     ("beartype", "beartype"),
+< ):
+<     from src.config import load_typed_root_config
+<     from src.dataset.data_module import DataModule
+<     from src.global_cfg import set_cfg
+<     from src.misc.LocalLogger import LocalLogger
+<     from src.misc.step_tracker import StepTracker
+<     from src.misc.wandb_tools import update_checkpoint_path
+<     from src.model.autoencoder import get_autoencoder
+<     from src.model.decoder import get_decoder
+<     from src.model.discriminator import get_discriminator
+<     from src.model.encoder import get_encoder
+<     from src.model.model_wrapper import ModelWrapper
+< 
+---
+> # with install_import_hook(
+> #     ("src",),
+> #     ("beartype", "beartype"),
+> # ):
+> from src.config import load_typed_root_config
+> from src.dataset.data_module import DataModule
+> from src.global_cfg import set_cfg
+> from src.misc.LocalLogger import LocalLogger
+> from src.misc.step_tracker import StepTracker
+> from src.misc.wandb_tools import update_checkpoint_path
+> from src.model.autoencoder import get_autoencoder
+> from src.model.decoder import get_decoder
+> from src.model.discriminator import get_discriminator
+> from src.model.encoder import get_encoder
+> from src.model.model_wrapper import ModelWrapper
+> 
+> torch.set_float32_matmul_precision('medium')
+> # import torch, pytorch_lightning as pl
+> # torch.cuda.set_per_process_memory_fraction(0.95, 0)  # 留 5 % 余量
+37,41c43,49
+< @hydra.main(
+<     version_base=None,
+<     config_path="../config",
+<     config_name="main",
+< )
+---
+> def log(msg: str):
+>     print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
+> 
+> 
+> 
+> # @hydra.main(version_base=None, config_path="../config", config_name="main")
+> @hydra.main(config_path="../config", config_name="main", version_base=None)
+46a55,61
+>     from omegaconf import OmegaConf
+>     # print("========== cfg_dict.loss ==========")
+>     # print(OmegaConf.to_yaml(cfg_dict.loss)) 
+> 
+>     print(f"[DEBUG] Hydra config loaded from: {hydra.core.hydra_config.HydraConfig.get().job.config_name}")
+>     # print(f"[DEBUG] Full config:\n{OmegaConf.to_yaml(cfg_dict)}")
+> 
+48,50c63
+<     output_dir = Path(
+<         hydra.core.hydra_config.HydraConfig.get()["runtime"]["output_dir"]
+<     )
+---
+>     output_dir = Path(hydra.core.hydra_config.HydraConfig.get()["runtime"]["output_dir"])
+61c74
+<             mode=cfg_dict.wandb.mode,
+---
+>             mode="offline",
+67c80
+<             entity=cfg_dict.wandb.entity
+---
+>             entity=cfg_dict.wandb.entity,
+70,71d82
+< 
+<         # On rank != 0, wandb.run is None.
+77a89,92
+>     # 1. 每 2500 步留一个快照，最多 10 个（防止炸盘）
+>     callbacks = []
+> 
+>     # 1. 定时快照 + last.ckpt
+80c95,96
+<             output_dir / "checkpoints",
+---
+>             dirpath=output_dir / "checkpoints" / "snapshots",
+>             filename="step{step:06d}",
+82,83c98,113
+<             save_top_k=cfg.checkpointing.save_top_k,
+<             save_last=True
+---
+>             save_top_k=-1,
+>             save_last=True,
+>             auto_insert_metric_name=False,
+>         )
+>     )
+> 
+>     # 2. 验证最优
+>     callbacks.append(
+>         ModelCheckpoint(
+>             dirpath=output_dir / "checkpoints" / "best",
+>             filename="best-step{step:06d}-val_loss{val/loss:.4f}",
+>             monitor="val/loss",
+>             mode="min",
+>             save_top_k=1,
+>             save_last=False,
+>             auto_insert_metric_name=False,
+86a117,119
+> 
+>     callbacks[-2].save_last = True 
+> 
+89,90d121
+< 
+<     # This allows the current step to be shared with the data loader processes.
+92a124,132
+> 
+>     # 新代码（直接粘贴上去）
+>     callbacks.append(
+>         GifEveryNStep(every_n_steps=50,        # 测试时设 50，正式训练改 2500
+>                     output_dir=output_dir / "progress_gif",
+>                     fps=12, n_frames=20, h=176, w=176)
+>     )
+> 
+>     log(">>> 即将构建 Trainer")
+96c136,139
+<         logger=logger,
+---
+>         logger=[
+>             TensorBoardLogger("outputs", name="lightning_logs"),
+>             logger,  # 这是你原来的 WandbLogger
+>         ],
+107c150
+<     autoencoder = get_autoencoder(cfg.model.autoencoder)    
+---
+>     autoencoder = get_autoencoder(cfg.model.autoencoder)
+112,113c155,159
+<         scale_factor=Fraction(cfg.model.supersampling_factor, 1 if cfg.model.encode_latents else autoencoder.downscale_factor),
+<         variational=cfg.model.variational != "none"
+---
+>         scale_factor=Fraction(
+>             cfg.model.supersampling_factor,
+>             1 if cfg.model.encode_latents else autoencoder.downscale_factor,
+>         ),
+>         variational=cfg.model.variational != "none",
+116c162,165
+<     
+---
+> 
+>     print(f"[DEBUG] cfg.loss = {cfg.loss}")
+>     print(f"[DEBUG] cfg.loss.gaussian = {cfg.loss.gaussian}")
+> 
+117a167
+>         cfg=cfg,
+130d179
+<         gaussian_loss_cfg=cfg.loss.gaussian,
+136c185
+<         step_tracker=step_tracker
+---
+>         step_tracker=step_tracker,
+137a187,188
+> 
+>     log(">>> 即将实例化 ModelWrapper")
+139d189
+<         # Just load model weights but no optimizer state
+142a193,194
+> 
+>     log(">>> 即将构造 DataModule")
+145a198
+>         log(">>> 即将调用 trainer.fit(...)")
+146a200
+>         log(">>> trainer.fit 已返回")
+156c210
+<     train()
+---
+>     train()
+\ No newline at end of file
+diff -r original/src/misc/LocalLogger.py modified/src/misc/LocalLogger.py
+6c6,7
+< from pytorch_lightning.loggers.logger import Logger
+---
+> # from pytorch_lightning.loggers.logger import Logger
+> from pytorch_lightning.loggers import TensorBoardLogger
+12,16c13,26
+< class LocalLogger(Logger):
+<     def __init__(self) -> None:
+<         super().__init__()
+<         self.experiment = None
+<         os.system(f"rm -r {LOG_PATH}")
+---
+> # class LocalLogger(Logger):
+> #     def __init__(self) -> None:
+> #         super().__init__()
+> #         self.experiment = None
+> #         os.system(f"rm -r {LOG_PATH}")
+> 
+> class LocalLogger(TensorBoardLogger):
+>     def __init__(self, **kwargs):
+>         super().__init__(
+>             save_dir="lightning_logs",
+>             name=None,
+>             version=None,
+>             default_hp_metric=False
+>         )
+diff -r original/src/model/autoencoder/autoencoder_kl.py modified/src/model/autoencoder/autoencoder_kl.py
+74a75,79
+>                     # -------- 通道投射 --------
+>         self.latent_proj = nn.Conv2d(16, self.cfg.latent_channels, 1, bias=False)
+>         # 随机初始化后设为 buffer，不让它参与 strict 检查
+>         self.register_buffer("latent_proj_weight", torch.randn(self.cfg.latent_channels, 16, 1, 1))
+>         del self.latent_proj  # 删除普通 nn.Conv2d，避免重复
+172a178,185
+>        #
+>        if z.shape[-3] != self.cfg.latent_channels:
+>         z = torch.nn.functional.conv2d(
+>             z.flatten(0, -4),
+>             weight=self.latent_proj_weight,
+>             bias=None,
+>         ).unflatten(0, z.shape[:-3])
+> 
+190a204,207
+>     def latent_channels(self) -> int:
+>         return self.cfg.latent_channels
+>     
+>     @property
+200a218,221
+>     
+>     # def load_state_dict(self, state_dict, strict=True):
+>     #     # 允许缺失 latent_proj_weight 等新增 buffer
+>     #     super().load_state_dict(state_dict, strict=False)
+diff -r original/src/model/decoder/cuda_splatting.py modified/src/model/decoder/cuda_splatting.py
+31a32,33
+>     # top = tan_fov_y * near
+>     near = near.to(tan_fov_y.device)
+32a35
+> 
+43a47,48
+>     # result[:, 2, 2] = far / (far - near)
+>     near = near.to(far.device)
+44a50
+> 
+74c80,96
+<     # Make sure everything is in a range where numerical issues don't appear.
+---
+>     # ---- 统一设备到extrinsics ----
+>     device = extrinsics.device
+>     near  = near.to(device)
+>     far   = far.to(device)
+>     background_color = background_color.to(device)
+>     gaussian_means     = gaussian_means.to(device)
+>     gaussian_covariances = gaussian_covariances.to(device)
+>     gaussian_opacities   = gaussian_opacities.to(device)
+>     if gaussian_color_sh_coefficients is not None:
+>         gaussian_color_sh_coefficients = gaussian_color_sh_coefficients.to(device)
+>     if gaussian_feature_sh_coefficients is not None:
+>         gaussian_feature_sh_coefficients = gaussian_feature_sh_coefficients.to(device)
+>     # --------------------------------
+> 
+>     # 保证scale始终存在且设备一致
+>     b = extrinsics.shape[0]
+>     scale = torch.ones(b, device=device)          # 默认1，不变量
+82c104
+<         far = far * scale
+---
+>         far  = far * scale
+83a106
+>     # 以下代码与官方仓库完全一致，未做任何改动
+93d115
+<             # TODO implement general feature SH conversion in CUDA rasterizer
+96c118
+<             dir_pp_normalized = dir_pp/dir_pp.norm(dim=-1, keepdim=True)
+---
+>             dir_pp_normalized = dir_pp / dir_pp.norm(dim=-1, keepdim=True)
+98,99c120,121
+<                 isqrt(gaussian_feature_sh_coefficients.shape[-1]) - 1, 
+<                 gaussian_feature_sh_coefficients, 
+---
+>                 isqrt(gaussian_feature_sh_coefficients.shape[-1]) - 1,
+>                 gaussian_feature_sh_coefficients,
+125d146
+<         # Set up a tensor for the gradients of the screen-space means.
+143c164
+<             prefiltered=False,  # This matches the original usage.
+---
+>             prefiltered=False,
+148c169
+<         row, col = torch.triu_indices(3, 3)
+---
+>         row, col = torch.triu_indices(3, 3, device=device)
+163,168d183
+<     all_images = torch.stack(all_images) if all_images[0] is not None else None
+<     all_feature_maps = torch.stack(all_feature_maps) if all_feature_maps[0] is not None else None
+<     all_masks = torch.stack(all_masks)
+<     all_depth_maps = torch.stack(all_depth_maps)
+<     return RenderOutput(all_images, all_feature_maps, all_masks, all_depth_maps)
+< 
+170,287d184
+< def render_cuda_orthographic(
+<     extrinsics: Float[Tensor, "batch 4 4"],
+<     width: Float[Tensor, " batch"],
+<     height: Float[Tensor, " batch"],
+<     near: Float[Tensor, " batch"],
+<     far: Float[Tensor, " batch"],
+<     image_shape: tuple[int, int],
+<     background_features: Float[Tensor, "batch 3"],
+<     gaussian_means: Float[Tensor, "batch gaussian 3"],
+<     gaussian_covariances: Float[Tensor, "batch gaussian 3 3"],
+<     gaussian_opacities: Float[Tensor, "batch gaussian"],
+<     gaussian_color_sh_coefficients: Float[Tensor, "batch gaussian 3 d_sh"] | None = None,
+<     gaussian_feature_sh_coefficients: Float[Tensor, "batch gaussian channels d_sh"] | None = None,
+<     fov_degrees: float = 0.1,
+<     use_sh: bool = True,
+<     dump: dict | None = None,
+< ) -> Tuple[
+<         Optional[Float[Tensor, "batch channels height width"]],
+<         Optional[Float[Tensor, "batch channels height width"]]
+<     ]:
+<     b, _, _ = extrinsics.shape
+<     h, w = image_shape
+<     
+<     color_sh_degree = 0
+<     shs = None
+<     features = None
+<     colors_precomp = None
+<     if use_sh:
+<         if gaussian_color_sh_coefficients is not None:
+<             color_sh_degree = isqrt(gaussian_color_sh_coefficients.shape[-1]) - 1
+<             shs = rearrange(gaussian_color_sh_coefficients, "b g xyz n -> b g n xyz").contiguous()
+<         if gaussian_feature_sh_coefficients is not None:
+<             # TODO implement general feature SH conversion in CUDA rasterizer
+<             campos = extrinsics[:, :3, 3]
+<             dir_pp = gaussian_means - campos.unsqueeze(1)
+<             dir_pp_normalized = dir_pp/dir_pp.norm(dim=-1, keepdim=True)
+<             features = 0.5 + eval_sh(
+<                 isqrt(gaussian_feature_sh_coefficients.shape[-1]) - 1, 
+<                 gaussian_feature_sh_coefficients, 
+<                 dir_pp_normalized
+<             )
+<     else:
+<         if gaussian_color_sh_coefficients is not None:
+<             colors_precomp = gaussian_color_sh_coefficients[..., 0]
+<         if gaussian_feature_sh_coefficients is not None:
+<             features = gaussian_feature_sh_coefficients[..., 0]
+< 
+<     # Create fake "orthographic" projection by moving the camera back and picking a
+<     # small field of view.
+<     fov_x = torch.tensor(fov_degrees, device=extrinsics.device).deg2rad()
+<     tan_fov_x = (0.5 * fov_x).tan()
+<     distance_to_near = (0.5 * width) / tan_fov_x
+<     tan_fov_y = 0.5 * height / distance_to_near
+<     fov_y = (2 * tan_fov_y).atan()
+<     near = near + distance_to_near
+<     far = far + distance_to_near
+<     move_back = torch.eye(4, dtype=torch.float32, device=extrinsics.device)
+<     move_back[2, 3] = -distance_to_near
+<     extrinsics = extrinsics @ move_back
+< 
+<     # Escape hatch for visualization/figures.
+<     if dump is not None:
+<         dump["extrinsics"] = extrinsics
+<         dump["fov_x"] = fov_x
+<         dump["fov_y"] = fov_y
+<         dump["near"] = near
+<         dump["far"] = far
+< 
+<     projection_matrix = get_projection_matrix(
+<         near, far, repeat(fov_x, "-> b", b=b), fov_y
+<     )
+<     projection_matrix = rearrange(projection_matrix, "b i j -> b j i")
+<     view_matrix = rearrange(extrinsics.inverse(), "b i j -> b j i")
+<     full_projection = view_matrix @ projection_matrix
+< 
+<     all_images = []
+<     all_feature_maps = []
+<     all_masks = []
+<     all_depth_maps = []
+<     for i in range(b):
+<         # Set up a tensor for the gradients of the screen-space means.
+<         mean_gradients = torch.zeros_like(gaussian_means[i], requires_grad=True)
+<         try:
+<             mean_gradients.retain_grad()
+<         except Exception:
+<             pass
+< 
+<         settings = GaussianRasterizationSettings(
+<             image_height=h,
+<             image_width=w,
+<             tanfovx=tan_fov_x,
+<             tanfovy=tan_fov_y,
+<             bg=background_features[i],
+<             scale_modifier=1.0,
+<             viewmatrix=view_matrix[i],
+<             projmatrix=full_projection[i],
+<             sh_degree=color_sh_degree,
+<             campos=extrinsics[i, :3, 3],
+<             prefiltered=False,  # This matches the original usage.
+<             debug=False,
+<         )
+<         rasterizer = GaussianRasterizer(settings)
+< 
+<         row, col = torch.triu_indices(3, 3)
+< 
+<         image, feature_map, mask, depth_map, _ = rasterizer(
+<             means3D=gaussian_means[i],
+<             means2D=mean_gradients,
+<             shs=shs[i] if shs is not None else None,
+<             colors_precomp=colors_precomp[i] if colors_precomp is not None else None,
+<             features=features[i] if features is not None else None,
+<             opacities=gaussian_opacities[i, ..., None],
+<             cov3D_precomp=gaussian_covariances[i, :, row, col],
+<         )
+<         all_images.append(image)
+<         all_feature_maps.append(feature_map)
+<         all_masks.append(mask.squeeze(0))
+<         all_depth_maps.append(depth_map.squeeze(0))
+340a238,239
+> def render_cuda_orthographic(*args, **kwargs):
+>     raise NotImplementedError("render_cuda_orthographic not implemented yet")
+diff -r original/src/model/decoder/decoder_splatting_cuda.py modified/src/model/decoder/decoder_splatting_cuda.py
+0a1
+> # src/model/decoder/decoder_splatting_cuda.py
+2a4
+> from dataclasses import replace
+45d46
+<             # NOTE background feature = 0 = mean = logvar (of normal distribution)
+57c58,59
+< 
+---
+>     
+>    
+69a72,73
+>         
+> 
+70a75
+> 
+73,74c78,139
+<         feature_sh = repeat(gaussians.feature_harmonics, "b g c d_sh -> (b v) g c d_sh", v=v) \
+<             if return_features and gaussians.feature_harmonics is not None else None
+---
+>         
+>         feature_sh = repeat(gaussians.features, "b g c d_sh -> (b v) g c d_sh", v=v) \
+>             if return_features and hasattr(gaussians, 'features') and gaussians.features is not None else None
+>         
+> 
+>         # 确保所有张量在同一设备
+>         device = gaussians.means.device
+>         color_sh = color_sh.to(device)
+>         if feature_sh is not None:
+>             feature_sh = feature_sh.to(device)
+> 
+>         H, W = color_sh.shape[-2:]   # 安全写法
+> 
+>         print("Gaussians fields:", dir(gaussians))
+> 
+>         from dataclasses import replace
+> 
+>         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+> 
+>         # 1. 裁剪高斯
+>         max_gaussians = 1_000
+>         if gaussians.means.shape[0] > max_gaussians:
+>             idx = torch.randperm(gaussians.means.shape[0], device=device)[:max_gaussians]
+>             gaussians = replace(
+>                 gaussians,
+>                 means=gaussians.means[idx],
+>                 covariances=gaussians.covariances[idx],
+>                 opacities=gaussians.opacities[idx],
+>                 color_harmonics=gaussians.color_harmonics[idx],
+>                 feature_harmonics=gaussians.feature_harmonics[idx] if gaussians.feature_harmonics is not None else None,
+>             )
+> 
+>         # 2. 统一搬设备
+>         extrinsics = extrinsics.to(device)
+>         intrinsics = intrinsics.to(device)
+>         color_sh   = color_sh.to(device)
+>         if feature_sh is not None:
+>             feature_sh = feature_sh.to(device)
+> 
+>         gaussians = replace(
+>             gaussians,
+>             means=gaussians.means.to(device),
+>             covariances=gaussians.covariances.to(device),
+>             opacities=gaussians.opacities.to(device),
+>             color_harmonics=gaussians.color_harmonics.to(device),
+>             feature_harmonics=None,
+>         )
+> 
+>         # ---------- 安全获取 scale ----------
+>         if hasattr(gaussians, 'scales') and gaussians.scales is not None:
+>             scale = gaussians.scales
+>         elif hasattr(gaussians, 'scale') and gaussians.scale is not None:
+>             scale = gaussians.scale
+>         else:
+>             import logging
+>             logging.getLogger(__name__).warning(
+>                 "Neither 'scales' nor 'scale' found in gaussians, falling back to torch.ones"
+>             )
+>             scale = torch.ones(gaussians.means.shape[0], device=gaussians.means.device)
+>         # ---------- scale 获取完毕 ----------
+> 
+>         # 5. 渲染
+86c151
+<             feature_sh
+---
+>             feature_sh,
+115a181,207
+>     
+>     from .cuda_splatting import render_cuda, RenderOutput
+> 
+>     def render_rgb(
+>         self,
+>         gaussians: Gaussians,
+>         extrinsics: Float[Tensor, "4 4"],  # 单个相机
+>         intrinsics: Float[Tensor, "3 3"],
+>         near: float,
+>         far: float,
+>         image_size: tuple[int, int],
+>     ) -> Float[Tensor, "height width 3"]:
+>         """单相机彩色渲染，供 GIF 回调使用"""
+>         # 升维到 (1,1,...) 再扔给已有 forward
+>         out: DecoderOutput = self(
+>             gaussians,
+>             extrinsics[None, None],
+>             intrinsics[None, None],
+>             torch.tensor([[near]], device=extrinsics.device),
+>             torch.tensor([[far]], device=extrinsics.device),
+>             image_size,
+>             return_colors=True,
+>             return_features=False,
+>         )
+>         # 取出颜色图并转到 HWC
+>         rgb = out.color[0, 0].permute(1, 2, 0).clamp(0, 1)  # (H,W,3)
+>         return rgb
+diff -r original/src/model/encoder/encoder_epipolar.py modified/src/model/encoder/encoder_epipolar.py
+0a1,2
+> # src/model/encoder/encoder_epipolar.py
+> 
+68a71,73
+> 
+>         print(f"[EncoderEpipolar] cfg.num_surfaces = {cfg.num_surfaces}")
+> 
+103a109,110
+>         print(f"[EncoderEpipolar] num_surfaces={cfg.num_surfaces}, adapter.d_in={self.gaussian_adapter.d_in}, total={cfg.num_surfaces * (2 + self.gaussian_adapter.d_in)}")
+> 
+135a143,144
+>         print("[Encoder] forward received context type:", type(context))
+>         print("[Encoder] context keys:", context.keys() if isinstance(context, dict) else "Not a dict!")
+163c172,179
+<         # Sample depths from the resulting features.
+---
+> 
+>         print(f"[encoder] features @ forward entry: {features.shape}")
+> 
+>         # === 1. 先记录 backbone 空间分辨率 ===
+>         hb, wb = features.shape[-2:]          # 20, 20
+>         print(f"[ENCODER_DEBUG] hb={hb}, wb={wb}")
+> 
+>         # === 2. 再压扁成序列 ===
+164a181,182
+> 
+>         # === 3. 深度预测（只接受序列） ===
+173,175c191,196
+<         # Convert the features and depths into Gaussians.
+<         xy_ray, _ = sample_image_grid((h, w), device)
+<         xy_ray = rearrange(xy_ray, "h w xy -> (h w) () xy")
+---
+>         # === 4. 用原始分辨率生成射线格子 ===
+>         xy_ray, _ = sample_image_grid((hb, wb), device)          # [20, 20, 2]
+>         xy_ray = rearrange(xy_ray, "h w xy -> (h w) () xy")      # [400, 1, 2]
+>         print(f"[ENCODER_DEBUG] xy_ray.shape={xy_ray.shape}")
+> 
+>         print(f"[encoder] features before to_gaussians: {features.shape}")
+182c203,211
+<         pixel_size = 1 / torch.tensor((w, h), dtype=torch.float32, device=device)
+---
+> 
+>         # 在 182 行之前加一行
+>         print(f"[encoder] (w, h) = ({w}, {h})")
+>         # ✅ 正确：用 backbone 分辨率计算 pixel_size
+>         pixel_size = 1 / torch.tensor((wb, hb), dtype=torch.float32, device=device)
+> 
+>         print(f"[encoder] xy_ray.shape = {xy_ray.shape}")
+>         print(f"[encoder] offset_xy.shape = {offset_xy.shape}")
+> 
+183a213,216
+> 
+>         print(f"[DEBUG] xy_ray min: {xy_ray.min().item():.4f}, max: {xy_ray.max().item():.4f}")
+>         print(f"[DEBUG] valid range x: [0, {wb-1}], y: [0, {hb-1}]")
+> 
+185,193c218,231
+<         gaussians = self.gaussian_adapter.forward(
+<             rearrange(context["extrinsics"], "b v i j -> b v () () () i j"),
+<             rearrange(context["intrinsics"], "b v i j -> b v () () () i j"),
+<             rearrange(xy_ray, "b v r srf xy -> b v r srf () xy"),
+<             depths,
+<             self.map_pdf_to_opacity(densities, global_step) / gpp,
+<             rearrange(gaussians[..., 2:], "b v r srf c -> b v r srf () c"),
+<             (h, w),
+<         )
+---
+>         with torch.no_grad():
+>             gaussians = self.gaussian_adapter.forward(
+>                 rearrange(context["extrinsics"], "b v i j -> b v () () () i j"),
+>                 rearrange(context["intrinsics"], "b v i j -> b v () () () i j"),
+>                 rearrange(xy_ray, "b v r srf xy -> b v r srf () xy"),
+>                 depths,
+>                 self.map_pdf_to_opacity(densities, global_step) / gpp,
+>                 rearrange(gaussians[..., 2:], "b v r srf c -> b v r srf () c"),
+>                 (h, w),
+>             )
+>         
+>         print(f"[encoder] xy_ray.shape={xy_ray.shape}, "
+>         f"offset_xy.shape={offset_xy.shape}, "
+>         f"pixel_size.shape={pixel_size.shape}")
+196a235,238
+>             # 1. 先存实际分辨率
+>             visualization_dump["hb"] = hb
+>             visualization_dump["wb"] = wb
+>             # 2. 再 dump 深度图
+198c240
+<                 depths, "b v (h w) srf s -> b v h w srf s", h=h, w=w
+---
+>                 depths, "b v (h w) srf s -> b v h w srf s", h=hb, w=wb
+219a262
+> 
+225c268
+<             rearrange(
+---
+>             means=rearrange(
+229c272
+<             rearrange(
+---
+>             covariances=rearrange(
+233c276
+<             rearrange(
+---
+>             opacities=rearrange(
+237c280,284
+<             rearrange(
+---
+>             scales=rearrange(
+>                 gaussians.scales,
+>                 "b v r srf spp xyz -> b (v r srf spp) xyz",
+>             ),
+>             color_harmonics=rearrange(
+241c288
+<             gaussian_features,
+---
+>             feature_harmonics=gaussian_features,  
+diff -r original/src/model/encoder/epipolar/depth_predictor_monocular.py modified/src/model/encoder/epipolar/depth_predictor_monocular.py
+49d48
+< 
+diff -r original/src/model/encoder/epipolar/epipolar_sampler.py modified/src/model/encoder/epipolar/epipolar_sampler.py
+27a28
+>     depths: Float[Tensor, "batch view other_view ray sample"] 
+78d78
+< 
+82c82
+<         sample_depth = rearrange(sample_depth, "s -> s ()")
+---
+>         # sample_depth = rearrange(sample_depth, "s -> s ()")
+88a89
+>         sample_depth = sample_depth.view(1, 1, 1, 1, s, 1)   
+91,97c92,131
+<         # The samples' shape is (batch, view, other_view, ...). However, before the
+<         # transpose, the view dimension refers to the view from which the ray is cast,
+<         # not the view from which samples are drawn. Thus, we need to transpose the
+<         # samples so that the view dimension refers to the view from which samples are
+<         # drawn. If the diagonal weren't removed for efficiency, this would be a literal
+<         # transpose. In our case, it's as if the diagonal were re-added, the transpose
+<         # were taken, and the diagonal were then removed again.
+---
+>                 # ---------- ① 补齐射线数到整张图，保证后面 reshape 不崩 ----------
+>         _, _, _, r_all = projection["overlaps_image"].shape   # 当前有效射线数
+>         h, w = images.shape[-2:]                               # 原图高宽
+>         r_needed = h * w                                       # 目标射线数 = 整张图
+>         if r_all != r_needed:
+>             # 1. 把 mask 补成 True
+>             flat_mask = projection["overlaps_image"].reshape(-1)          # (B*V*OV*R,)
+>             n_pad = r_needed - r_all
+>             # 随机挑 n_pad 条已有射线做复制（避免全 0）
+>             idx_true = torch.where(flat_mask)[0]
+>             pad_idx = idx_true[torch.randint(len(idx_true), (n_pad,), device=idx_true.device)]
+>             flat_mask = torch.cat([flat_mask, flat_mask[pad_idx]])        # 补 True
+>             projection["overlaps_image"] = flat_mask.reshape(b, v, v-1, r_needed)
+> 
+>             # 2. 把 xy_sample 补到同样长度
+>             flat_xy = xy_sample.reshape(-1, s, 2)                         # (N, 484, 2)
+>             pad_xy = flat_xy[pad_idx]                                     # 复制同样条数
+>             flat_xy = torch.cat([flat_xy, pad_xy], 0)                     # (N+n_pad, 484, 2)
+>             xy_sample = flat_xy.reshape(b, v, v-1, r_needed, s, 2)       # 现在长度对齐了
+>         # ----------------------------------------------------------
+> 
+>         # ---------- ② 无效射线对应的样本直接置 0 ----------
+>         xy_sample = xy_sample * projection["overlaps_image"][..., None, None]
+> 
+>         # 2. 提前保护：没有有效样本直接返回空张量
+>         if projection["overlaps_image"].sum() == 0:
+>             b, v, c, h, w = images.shape
+>             r = h * w                                      # 射线数 = 整张图
+>             s = self.num_samples
+>             return EpipolarSampling(
+>                 features=images.new_zeros(b, v, v-1, r, s, c),
+>                 valid=projection["overlaps_image"],          # 全 False
+>                 xy_ray=xy_ray,
+>                 xy_sample=xy_sample.new_zeros(b, v, v-1, r, s, 2),
+>                 xy_sample_near=xy_sample.new_zeros(b, v, v-1, r, s, 2),
+>                 xy_sample_far=xy_sample.new_zeros(b, v, v-1, r, s, 2),
+>                 origins=origins,
+>                 directions=directions,
+>             )
+> 
+105a140,141
+> 
+> 
+109c145,153
+<         samples = self.transpose(samples)
+---
+>         samples = self.transpose(samples)          # (B, V, OV, R, S, C)
+>         # ---------- 构造 depths ----------
+>         b, v, ov, r, s, c = samples.shape
+>         depths = sample_depth.view(1, 1, 1, 1, s, 1).expand(b, v, ov, r, -1, 1).squeeze(-1)
+> 
+> 
+>         print("[EpipolarSampler] samples.shape:", samples.shape)
+>         print("[EpipolarSampler] r_needed:", h * w)
+>         print("[EpipolarSampler] r_all after pad:", samples.shape[3])
+123a168
+>             depths=depths,   
+diff -r original/src/model/encoder/epipolar/epipolar_transformer.py modified/src/model/encoder/epipolar/epipolar_transformer.py
+0a1
+> # src/model/encoder/epipolar/epipolar_transformer.py
+5c6,7
+< from einops import rearrange
+---
+> 
+> from einops import rearrange, repeat
+7a10
+> import torch
+16c19
+< 
+---
+> import math  
+24c27
+<     num_samples: int
+---
+>     # num_samples: int
+27a31,34
+>     num_samples: int = 484
+>     num_context_views: int = 2  
+>     test_num_rays: int = 512              
+>     test_num_points_per_ray: int = 484 
+47c54,55
+<             get_cfg().dataset.view_sampler.num_context_views,
+---
+>             # get_cfg().dataset.view_sampler.num_context_views,
+>             cfg.num_context_views,   # 假设 cfg 里已经有这个字段
+69c77,78
+<             self.upscaler = nn.ConvTranspose2d(d_in, d_in, cfg.downscale, cfg.downscale)
+---
+>             # self.upscaler = nn.ConvTranspose2d(d_in, d_in, cfg.downscale, cfg.downscale)
+>             self.upscaler = nn.ConvTranspose2d(d_in, d_in, 2, 2)
+87,88c96,97
+<     ) -> tuple[Float[Tensor, "batch view channel height width"], EpipolarSampling,]:
+<         b, v, _, h, w = features.shape
+---
+>     ) -> tuple[Float[Tensor, "batch view channel height width"], EpipolarSampling]:
+>         b, v, c, h, w = features.shape
+90c99,104
+<         # If needed, apply downscaling.
+---
+>         # ===== 两行兼容代码：只处理广播，训练无副作用 =====
+>         for t in (near, far):  # t 形状可能是 [B,V] 或 [B,1]
+>             if t.dim() == 2 and t.shape[1] == 1:  # 真正缺失 view 维
+>                 t.data = t.expand(b, v)
+> 
+>         # 1. 可选下采样
+96,97c110,111
+<         # Get the samples used for epipolar attention.
+<         sampling = self.epipolar_sampler.forward(
+---
+>         # 2. 采样
+>         sampling = self.epipolar_sampler(
+100a115,135
+>         # 3. 早停：无有效样本
+>         if sampling.features.shape[2] == 0:  # other_view 维
+>             return features.new_zeros(b, v, c, h, w), sampling
+> 
+>         # 4. 训练/测试分叉
+>         if self.training:
+>             q = sampling.features  # (B,V,OV,H,W,C)
+>         else:
+>             q = sampling.features[:, :, :, :self.cfg.test_num_rays]  # (B,V,OV,R,H,W,C)
+>             # 1. 压维 → (B,V,OV,R,S,C)  S=H*W
+>             if q.ndim == 7:
+>                 b_, v_, ov_, r_, h_, w_, c_ = q.shape
+>                 q = q.view(b_, v_, ov_, r_, h_*w_, c_)
+>             else:  # 6 维
+>                 b_, v_, ov_, r_, s_, c_ = q.shape
+> 
+>             # 2. 关键：测试时若 S=1，先 pad 到 2，防止后面 squeeze 掉
+>             if q.size(-2) == 1 and not self.training:
+>                 q = torch.cat([q, q], dim=-2)
+> 
+>         # 5. 可选深度编码
+102d136
+<             # Compute positionally encoded depths for the features.
+111,115c145,148
+< 
+<             # Clip the depths. This is necessary for edge cases where the context views
+<             # are extremely close together (or possibly oriented the same way).
+<             depths = depths.maximum(near[..., None, None, None])
+<             depths = depths.minimum(far[..., None, None, None])
+---
+>             depths = depths.clip(
+>                 near[..., None, None, None],
+>                 far[..., None, None, None],
+>             )
+121,124c154
+<             depths = self.depth_encoding(depths[..., None])
+<             q = sampling.features + depths
+<         else:
+<             q = sampling.features
+---
+>             q = q + self.depth_encoding(depths[..., None])
+126,143c156,157
+<         # Run the transformer.
+<         kv = rearrange(features, "b v c h w -> (b v h w) () c")
+<         features = self.transformer.forward(
+<             kv,
+<             rearrange(q, "b v () r s c -> (b v r) s c"),
+<             b=b,
+<             v=v,
+<             h=h // self.cfg.downscale,
+<             w=w // self.cfg.downscale,
+<         )
+<         features = rearrange(
+<             features,
+<             "(b v h w) () c -> b v c h w",
+<             b=b,
+<             v=v,
+<             h=h // self.cfg.downscale,
+<             w=w // self.cfg.downscale,
+<         )
+---
+>         # 6. 构造 kv：整幅图展平
+>         kv = rearrange(features, "b v c h w -> (b v h w) () c")  # (B*V*H*W, 1, C)
+145,146c159,182
+<         # If needed, apply upscaling.
+<         if self.upscaler is not None:
+---
+>         # 7. 统一 reshape q
+>         q_flat = rearrange(q, "b v ov r s c -> (b v ov r) s c")  # (B*V*OV*R, S, C)
+> 
+>         # 8. 过 Transformer
+>         features = self.transformer(kv, q_flat, b=b, v=v, h=-1, w=-1)  # (T, S, C)
+> 
+>         # 9. 摆回多维 – 训练/测试分叉
+>         if self.training:
+>             L = features.size(0) // (b * v)
+>             h_patches = int(math.sqrt(L))
+>             w_patches = L // h_patches
+>             assert h_patches * w_patches == L, f"cannot factor {L} into 2 ints"
+>             features = rearrange(
+>                 features, "(b v h w) () c -> b v c h w",
+>                 b=b, v=v, h=h_patches, w=w_patches
+>             )
+>         else:
+>             # 9. 摆回 6 维 – 测试专用
+>             features = rearrange(features, "(b v ov r) s c -> b v ov r s c",
+>                                  b=b, v=v, ov=q.shape[2], r=q.shape[3])
+>             features = rearrange(features, "b v ov r s c -> b v c (ov r) s")
+> 
+>         # 10. 可选上采样（仅训练）
+>         if self.upscaler is not None and self.training:
+164,165c200,201
+<         self.layers = nn.Sequential(
+<             nn.Conv2d(d_in, d_hidden, 7, 1, 3),
+---
+>         self.mlp = nn.Sequential(
+>             nn.Linear(d_in, d_hidden),
+168c204
+<             nn.Conv2d(d_hidden, d_in, 7, 1, 3),
+---
+>             nn.Linear(d_hidden, d_in),
+171c207,208
+<         self.self_attention = ImageSelfAttention(self_attention_cfg, d_in, d_in)
+---
+>         self.self_attention = nn.Identity()  
+>         
+181,183c218,231
+<         x = rearrange(x, "(b v h w) () c -> (b v) c h w", b=b, v=v, h=h, w=w)
+<         x = self.layers(self.self_attention(x) + x)
+<         return rearrange(x, "(b v) c h w -> (b v h w) () c", b=b, v=v, h=h, w=w)
+---
+>         if not self.training and x.size(1) == 1:   
+>             x = x.expand(-1, 2, -1)                
+>         if self.training:
+>             x = x.squeeze(1)                      
+>             x = self.mlp(x) + x
+>             return x.unsqueeze(1)                
+>         else:
+>             T, S, C = x.shape
+>             x = x.reshape(-1, C)        
+>             x = self.mlp(x) + x
+>             x = x.reshape(T, S, C)        
+>             return x 
+>        
+>         
+diff -r original/src/model/encoder/epipolar/image_self_attention.py modified/src/model/encoder/epipolar/image_self_attention.py
+38a39,42
+>         # self.patch_embedder = nn.Sequential(
+>         #     nn.Conv2d(d_in, cfg.d_token, cfg.patch_size, cfg.patch_size),
+>         #     nn.ReLU(),
+>         # )
+40c44,45
+<             nn.Conv2d(d_in, cfg.d_token, cfg.patch_size, cfg.patch_size),
+---
+>             nn.Conv2d(d_in, cfg.d_token, kernel_size=cfg.patch_size, stride=1,
+>                     padding=cfg.patch_size // 2),  # ← 关键
+42a48,54
+> 
+>         self.resampler = nn.ConvTranspose2d(
+>             cfg.d_token, d_out,
+>             kernel_size=cfg.patch_size, stride=1,
+>             padding=cfg.patch_size // 2,  # ← 关键
+>         )
+> 
+50,55c62,67
+<         self.resampler = nn.ConvTranspose2d(
+<             cfg.d_token,
+<             d_out,
+<             cfg.patch_size,
+<             cfg.patch_size,
+<         )
+---
+>         # self.resampler = nn.ConvTranspose2d(
+>         #     cfg.d_token,
+>         #     d_out,
+>         #     cfg.patch_size,
+>         #     cfg.patch_size,
+>         # )
+diff -r original/src/model/encoder/visualization/encoder_visualizer_epipolar.py modified/src/model/encoder/visualization/encoder_visualizer_epipolar.py
+71,72d70
+<         # softmax_weights = torch.stack(softmax_weights)
+< 
+75a74,77
+>         # 获取实际分辨率
+>         hb = visualization_dump.get("hb", h)
+>         wb = visualization_dump.get("wb", w)
+>         h, w = hb, wb
+102,106d103
+<         # res["attention"] = self.visualize_attention(
+<         #     context_images,
+<         #     visualization_dump["sampling"],
+<         #     softmax_weights,
+<         # ),
+Only in modified/src/model: model_wrapper copy.py
+diff -r original/src/model/model_wrapper.py modified/src/model/model_wrapper.py
+0a1,4
+> # src/mode/model_wrapper.py
+> from __future__ import annotations
+> 
+> import time
+32,39c36,37
+< from ..visualization.camera_trajectory.interpolation import (
+<     interpolate_extrinsics,
+<     interpolate_intrinsics,
+< )
+< from ..visualization.camera_trajectory.wobble import (
+<     generate_wobble,
+<     generate_wobble_transformation,
+< )
+---
+> from ..visualization.camera_trajectory.interpolation import interpolate_extrinsics, interpolate_intrinsics
+> from ..visualization.camera_trajectory.wobble import generate_wobble, generate_wobble_transformation
+50a49,60
+> # ------------------------------------------------------------------ #
+> #                          调试开关                                   #
+> # ------------------------------------------------------------------ #
+> DEBUG = False
+> 
+> def log(msg: str) -> None:
+>     if DEBUG:
+>         print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
+> 
+> # ------------------------------------------------------------------ #
+> #                          配置结构体                                 #
+> # ------------------------------------------------------------------ #
+53d62
+<     # Assumes every step as frequency
+58,69d66
+< def freeze(m: Module) -> None:
+<     for param in m.parameters():
+<         param.requires_grad = False
+<     m.eval()
+< 
+< 
+< def unfreeze(m: Module) -> None:
+<     for param in m.parameters():
+<         param.requires_grad = True
+<     m.train()
+< 
+< 
+75c72,73
+<     discrimininator: bool = False
+---
+>     # discrimininator: bool = False
+>     discriminator: bool = False 
+88c86
+<     gradient_clip_val: float | int | None = None 
+---
+>     gradient_clip_val: float | int | None = None
+90a89
+> 
+98c97
+<     gradient_clip_val: float | int | None = None 
+---
+>     gradient_clip_val: float | int | None = None
+100a100
+> 
+105a106
+> 
+108a110,112
+>     decode_tile: int = 64
+>     num_rays: int = 64
+>     num_points_per_ray: int = 64
+119a124,138
+> # ------------------------------------------------------------------ #
+> #                          工具函数                                   #
+> # ------------------------------------------------------------------ #
+> def freeze(m: Module) -> None:
+>     m.eval()
+>     for p in m.parameters():
+>         p.requires_grad = False
+> 
+> 
+> def unfreeze(m: Module) -> None:
+>     m.train()
+>     for p in m.parameters():
+>         p.requires_grad = True
+> 
+> 
+122,125c141
+<     def __call__(
+<         self,
+<         t: Float[Tensor, " t"],
+<     ) -> tuple[
+---
+>     def __call__(self, t: Float[Tensor, " t"]) -> tuple[
+129,131c145,148
+<         pass
+< 
+< 
+---
+>         ...
+> # ------------------------------------------------------------------ #
+> #                      Lightning 封装                                 #
+> # ------------------------------------------------------------------ #
+132a150,154
+>     context_loss_cfg: LossGroupCfg | None = None,
+>     target_autoencoder_loss_cfg: LossGroupCfg | None = None,
+>     target_render_latent_loss_cfg: LossGroupCfg | None = None,
+>     target_render_image_loss_cfg: LossGroupCfg | None = None,
+>     target_combined_loss_cfg: LossGroupCfg | None = None,
+139d160
+<     supersampling_factor: int
+141c162
+<     gaussian_losses: LossGroup
+---
+>     gaussian_losses: LossGroup | None
+154a176
+>         cfg: Any,
+167d188
+<         gaussian_loss_cfg: LossGroupCfg | None = None,
+170a192
+>         target_combined_loss_cfg: LossGroupCfg | None = None,   # ← 补上
+172,173c194
+<         target_combined_loss_cfg: LossGroupCfg | None = None,
+<         step_tracker: StepTracker | None = None
+---
+>         step_tracker: StepTracker | None = None,
+174a196
+> 
+175a198
+>         self.cfg = cfg 
+177,178c200
+<         # self.strict_loading = False
+< 
+---
+>         log("[ModelWrapper] __init__ called")
+180d201
+< 
+185d205
+< 
+189c209,219
+<         # Set up the model.
+---
+>         if target_render_image_loss_cfg is None:
+>             target_render_image_loss_cfg = (
+>                 cfg.loss.target.render.image
+>                 if (hasattr(cfg, "loss") and
+>                     hasattr(cfg.loss, "target") and
+>                     hasattr(cfg.loss.target, "render") and
+>                     hasattr(cfg.loss.target.render, "image"))
+>                 else None
+>             )
+> 
+>         # --- 模型 ---
+198c228,239
+<         self.gaussian_losses = get_loss_group("gaussian", gaussian_loss_cfg)
+---
+>         # --- 损失 ---
+>         gaussian_loss_cfg = cfg.loss.gaussian
+>         log(f"[ModelWrapper] gaussian_loss_cfg = {gaussian_loss_cfg}")
+>         if gaussian_loss_cfg is not None:
+>             self.gaussian_losses = get_loss_group("gaussian", gaussian_loss_cfg)
+>             log(f"[ModelWrapper] gaussian_losses = {self.gaussian_losses}")
+>         else:
+>             log("[ModelWrapper] gaussian_loss_cfg is None")
+>             self.gaussian_losses = None
+> 
+> 
+>         # 补上这五行
+200c241
+<         self.target_autoencoder_losses = get_loss_group("target/autoencoder/loss", target_autoencoder_loss_cfg)
+---
+>         self.target_autoencoder_losses = get_loss_group("target/autoencoder", target_autoencoder_loss_cfg)
+205,215c246
+<         assert not self.target_render_latent_losses.has_generator_loss and not self.target_render_latent_losses.has_discriminator_loss, \
+<             "Cannot apply GAN losses in latent space"
+<         assert not self.target_render_image_losses.has_generator_loss and not self.target_render_image_losses.has_discriminator_loss, \
+<             "Cannot apply GAN losses on low resolution RGB space"
+<         
+<         if any(loss_group.has_generator_loss or loss_group.has_discriminator_loss \
+<                for loss_group in [self.context_losses, self.target_autoencoder_losses, self.target_combined_losses]):
+<             assert self.discriminator is not None, "Found GAN loss but no discriminator!"
+<             assert self.optimizer_cfg.discriminator is not None, "Found GAN loss but no discriminator optimizer config!"
+<             
+<         # Optionally freeze components
+---
+>         # --- 梯度 / 冻结 ---
+222c253
+<         if self.freeze_cfg.discrimininator:
+---
+>         if self.freeze_cfg.discriminator:            
+225d255
+<         # This is used for testing.
+227a258,288
+>         #  缓存学习率，供 configure_optimizers 使用
+>         self.generator_lr: float = 0.0
+>         self.autoencoder_lr: float = 0.0
+>         self.discriminator_lr: float = 0.0
+>         self._scale_factor = 1.0
+>     
+>     def load_state_dict(self, state_dict, strict=True):
+>         # 强制 non-strict，容忍旧 checkpoint 缺少任何键
+>         super().load_state_dict(state_dict, strict=False)
+> 
+>     def rescale(self, image: torch.Tensor, scale_factor: float) -> torch.Tensor:
+>         """Simple rescale by factor."""
+>         if scale_factor == 1.0:
+>             return image
+> 
+>         *leading_dims, c, h, w = image.shape
+>         new_h, new_w = int(h * scale_factor), int(w * scale_factor)
+> 
+>         # 压成 4D
+>         image_4d = image.view(-1, c, h, w)
+> 
+>         # 插值
+>         image_4d = torch.nn.functional.interpolate(
+>             image_4d, size=(new_h, new_w), mode="bilinear", align_corners=False
+>         )
+> 
+>         # 还原成原维度
+>         return image_4d.view(*leading_dims, c, new_h, new_w)
+> 
+> 
+>     # ---------------- 属性 ---------------- #
+237,240c298,301
+<             if res is None:
+<                 res = self.encoder.last_layer_weights
+<                 if res is None:
+<                     raise ValueError("Could not find last layer weights in autoencoder, decoder, or encoder")
+---
+>         if res is None:
+>             res = self.encoder.last_layer_weights
+>         if res is None:
+>             raise RuntimeError("No last_layer_weights found in autoencoder/decoder/encoder")
+242c303
+< 
+---
+>     
+245c306
+<         return tuple(get_integer(scale * s) for s in size)
+---
+>         return tuple(round(scale * s) for s in size)
+247,264c308,330
+<     def setup(self, stage: str) -> None:
+<         # Scale base learning rates to effective batch size
+<         if stage == "fit":
+<             assert self.trainer.accumulate_grad_batches == 1, "Gradient accumulation currently not supported because of manual optimization!"
+<             # assumes one fixed batch_size for all train dataloaders!
+<             effective_batch_size = self.trainer.accumulate_grad_batches \
+<                 * self.trainer.num_devices \
+<                 * self.trainer.num_nodes \
+<                 * self.trainer.datamodule.data_loader_cfg.train.batch_size
+<             
+<             self.generator_lr = effective_batch_size * self.optimizer_cfg.generator.lr \
+<                 if self.optimizer_cfg.generator.scale_lr else self.optimizer_cfg.generator.lr
+<             self.autoencoder_lr = effective_batch_size * self.optimizer_cfg.generator.autoencoder_lr \
+<                 if self.optimizer_cfg.generator.scale_autoencoder_lr else self.optimizer_cfg.generator.autoencoder_lr
+<             if self.optimizer_cfg.discriminator is not None:
+<                 self.discriminator_lr = effective_batch_size * self.optimizer_cfg.discriminator.lr \
+<                     if self.optimizer_cfg.discriminator.scale_lr else self.optimizer_cfg.discriminator.lr
+<         return super().setup(stage)
+---
+>     def get_active_loss_groups(self) -> Dict[str, bool]:
+>         step = self.step_tracker.get_step() if self.step_tracker else 0
+>         return {
+>             "gaussian": self.gaussian_losses.is_active(step) if self.gaussian_losses else False,
+>             "context": self.context_losses.is_active(step),
+>             "target_autoencoder": self.target_autoencoder_losses.is_active(step),
+>             "target_render_latent": self.target_render_latent_losses.is_active(step),
+>             "target_render_image": self.target_render_image_losses.is_active(step),
+>             "target_combined": self.target_combined_losses.is_active(step),
+>         }
+>     
+>     # ---------------- 优化器 --------------- #
+>     @staticmethod
+>     def get_optimizer(
+>         optimizer_cfg: GeneratorOptimizerCfg | DiscriminatorOptimizerCfg,
+>         params: Iterator[Parameter] | list[Dict[str, Any]],
+>         lr: float,
+>     ) -> optim.Optimizer:
+>         return getattr(optim, optimizer_cfg.name)(
+>             params,
+>             lr=lr,
+>             **(optimizer_cfg.kwargs or {}),
+>         )
+267,274c333,340
+<     def rescale(
+<         x: Float[Tensor, "... height width"], 
+<         scale_factor: Fraction
+<     ) -> Float[Tensor, "... downscaled_height downscaled_width"]:
+<         batch_dims = x.shape[:-2]
+<         spatial = x.shape[-2:]
+<         size = ModelWrapper.get_scaled_size(scale_factor, spatial)
+<         return resize(x.view(-1, *spatial), size=size, antialias=True).view(*batch_dims, *size)
+---
+>     def get_lr_scheduler(
+>         opt: optim.Optimizer,
+>         lr_scheduler_cfg: LRSchedulerCfg,
+>     ) -> optim.lr_scheduler.LRScheduler:
+>         return getattr(optim.lr_scheduler, lr_scheduler_cfg.name)(
+>             opt,
+>             **(lr_scheduler_cfg.kwargs or {}),
+>         )
+276,284c342,413
+<     def get_active_loss_groups(self):
+<         return {
+<             "gaussian": self.gaussian_losses.is_active(self.step_tracker.get_step()),
+<             "context": self.context_losses.is_active(self.step_tracker.get_step()),
+<             "target_autoencoder": self.target_autoencoder_losses.is_active(self.step_tracker.get_step()),
+<             "target_render_latent": self.target_render_latent_losses.is_active(self.step_tracker.get_step()),
+<             "target_render_image": self.target_render_image_losses.is_active(self.step_tracker.get_step()),
+<             "target_combined": self.target_combined_losses.is_active(self.step_tracker.get_step()),
+<         }
+---
+>     def configure_optimizers(self):
+>     # 现场计算 effective batch size
+>         eff_bs = (
+>             getattr(self.trainer, "num_devices", 1)
+>             * getattr(self.trainer, "num_nodes", 1)
+>             * self.trainer.datamodule.data_loader_cfg.train.batch_size
+>         )
+> 
+>         gen_lr = (
+>             eff_bs * self.optimizer_cfg.generator.lr
+>             if self.optimizer_cfg.generator.scale_lr
+>             else self.optimizer_cfg.generator.lr
+>         )
+>         auto_lr = (
+>             eff_bs * self.optimizer_cfg.generator.autoencoder_lr
+>             if self.optimizer_cfg.generator.scale_autoencoder_lr
+>             else self.optimizer_cfg.generator.autoencoder_lr
+>         )
+> 
+>         # 把计算值写回实例属性
+>         self.generator_lr = gen_lr
+>         self.autoencoder_lr = auto_lr
+> 
+>         optimizers = []
+>         schedulers = []
+> 
+>         # Generator optimizer
+>         g_opt = self.get_optimizer(
+>             self.optimizer_cfg.generator,
+>             [
+>                 {"params": chain(self.encoder.parameters(), self.decoder.parameters())},
+>                 {"params": self.autoencoder.parameters(), "lr": auto_lr}
+>                 | (self.optimizer_cfg.generator.autoencoder_kwargs or {}),
+>             ],
+>             gen_lr,
+>         )
+>         optimizers.append(g_opt)
+>         if self.optimizer_cfg.generator.scheduler:
+>             schedulers.append(self.get_lr_scheduler(g_opt, self.optimizer_cfg.generator.scheduler))
+> 
+>         # Discriminator optimizer
+>         if self.discriminator:
+>             disc_lr = (
+>                 eff_bs * self.optimizer_cfg.discriminator.lr
+>                 if self.optimizer_cfg.discriminator.scale_lr
+>                 else self.optimizer_cfg.discriminator.lr
+>             )
+>             self.discriminator_lr = disc_lr
+>             d_opt = self.get_optimizer(
+>                 self.optimizer_cfg.discriminator,
+>                 self.discriminator.parameters(),
+>                 disc_lr,
+>             )
+>             optimizers.append(d_opt)
+>             if self.optimizer_cfg.discriminator.scheduler:
+>                 schedulers.append(self.get_lr_scheduler(d_opt, self.optimizer_cfg.discriminator.scheduler))
+> 
+>         return optimizers, schedulers
+> 
+>     def forward(self, batch):
+>         context = batch["context"]
+>         features = None
+>         if self.encode_latents:
+>             posterior = self.autoencoder.encode(context["image"])
+>             features = posterior.sample()
+>         gaussians = self.encoder(
+>             context,
+>             self.step_tracker.get_step() if self.step_tracker else 0,
+>             features=features,
+>             deterministic=True
+>         )
+>         return gaussians, {}
+286,288c415,417
+<     def training_step(self, batch, batch_idx):
+<         # Tell the data loader processes about the current step.
+<         if self.step_tracker is not None:
+---
+>     # ---------------- 训练步 --------------- #
+>     def training_step(self, batch, batch_idx: int):
+>         if self.step_tracker:
+290c419
+<             self.log(f"step_tracker/step", self.step_tracker.get_step())
+---
+>             self.log("step_tracker/step", self.step_tracker.get_step())
+292d420
+<         # Get optimizers
+296,298d423
+<             # Do not increment global step for discriminator step
+<             d_opt._on_before_step = lambda : self.trainer.profiler.start("optimizer_step")
+<             d_opt._on_after_step = lambda : self.trainer.profiler.stop("optimizer_step")
+302,303c427
+<         # Data shim, shape...
+<         batch: BatchedExample = self.data_shim(batch)
+---
+>         batch = self.data_shim(batch)
+307,308d430
+< 
+<         # Find out active losses
+311c433
+<         # Prepare predictions and ground truth
+---
+>         # ---------- 初始化预测 & GT ----------
+313,316c435,438
+<         context_pred = Prediction()
+<         context_gt = GroundTruth(batch["context"]["image"])
+<         target_autoencoder_pred = Prediction()
+<         target_autoencoder_gt = GroundTruth(batch["target"]["image"])
+---
+>         context_pred   = Prediction()
+>         context_gt     = GroundTruth(batch["context"]["image"])
+>         target_autoencoder_pred  = Prediction()
+>         target_autoencoder_gt    = GroundTruth(batch["target"]["image"])
+318,320c440,442
+<         target_render_latent_gt = GroundTruth(near=batch["target"]["near"], far=batch["target"]["far"])
+<         target_render_image_pred = Prediction()
+<         target_render_image_gt = GroundTruth(
+---
+>         target_render_latent_gt   = GroundTruth(near=batch["target"]["near"], far=batch["target"]["far"])
+>         target_render_image_pred  = Prediction()
+>         target_render_image_gt    = GroundTruth(
+322,323c444,445
+<             near=batch["target"]["near"], 
+<             far=batch["target"]["far"]
+---
+>             near=batch["target"]["near"],
+>             far =batch["target"]["far"],
+326c448,450
+<         target_combined_gt = GroundTruth(batch["target"]["image"], near=batch["target"]["near"], far=batch["target"]["far"])
+---
+>         target_combined_gt   = GroundTruth(batch["target"]["image"],
+>                                         near=batch["target"]["near"],
+>                                         far =batch["target"]["far"])
+328,329c452
+<         # Run the model.
+<         # First generator pass
+---
+>         # ---------- 生成器前向 ----------
+331,333c454
+< 
+<         # Apply Autoencoder encoder to ...
+<         # ... context views
+---
+>         
+335,336c456,459
+<         if is_active_loss["context"] or \
+<             (self.encode_latents and \
+---
+>         context_latents   = None
+> 
+>         # 1) context 编码
+>         if is_active_loss["context"] or (self.encode_latents and
+343c466
+<         # ... target views
+---
+>         # 2) target 编码
+351,352c474,477
+<         
+<         if is_active_loss["gaussian"] or is_active_loss["target_render_latent"] or is_active_loss["target_render_image"] or is_active_loss["target_combined"]:
+---
+> 
+>         # 3) 高斯编码 + 渲染
+>         if any(is_active_loss[k] for k in ("gaussian", "target_render_latent",
+>                                         "target_render_image", "target_combined")):
+354c479
+<                 batch["context"], 
+---
+>                 batch["context"],
+360a486
+> 
+362c488
+<                 gaussians.sample() if self.variational in ("gaussians", "none") else gaussians.flatten(),     # Sample from variational Gaussians
+---
+>                 gaussians.sample() if self.variational in ("gaussians", "none") else gaussians.flatten(),
+370c496
+<                 return_features=is_active_loss["target_render_latent"] or is_active_loss["target_combined"]
+---
+>                 return_features=is_active_loss["target_render_latent"] or is_active_loss["target_combined"],
+371a498,506
+> 
+>             # ✅ 只 detach 你需要的字段（假设是 image 和 color）
+>             if hasattr(output, 'image') and output.image is not None:
+>                 output.image = output.image.detach().requires_grad_()
+>             if hasattr(output, 'color') and output.color is not None:
+>                 output.color = output.color.detach().requires_grad_()
+>             if hasattr(output, 'features') and output.features is not None:
+>                 output.features = output.features.detach().requires_grad_()
+> 
+375d509
+<             # Invert supersampling
+377c511
+<             target_render_latent_pred.image = z   # TODO use kl divergence between latents instead of image loss between samples?
+---
+>             target_render_latent_pred.image = z
+380c514
+<                 # Decode not batched with autoencoder branch because of skip connections
+---
+>                 skip_z = None
+382,384c516,517
+<                     skip_z = torch.cat((output.color.detach(), latent_sample), dim=-3) if self.autoencoder.expects_skip_extra else latent_sample
+<                 else:
+<                     skip_z = None
+---
+>                     skip_z = torch.cat((output.color.detach(), latent_sample), dim=-3) \
+>                         if self.autoencoder.expects_skip_extra else latent_sample
+386,387c519,520
+<         
+<         # Apply Autoencoder decoder batched
+---
+> 
+>         # 4) 批量解码 latents
+394c527,528
+<                 context_pred.image = rearrange(pred_images["context"], "(b v) c h w -> b v c h w", b=b, v=v_c)
+---
+>                 context_pred.image = rearrange(pred_images["context"],
+>                                             "(b v) c h w -> b v c h w", b=b, v=v_c)
+396c530,531
+<                 target_autoencoder_pred.image = rearrange(pred_images["target"], "(b v) c h w -> b v c h w", b=b, v=v_t)
+---
+>                 target_autoencoder_pred.image = rearrange(pred_images["target"],
+>                                                         "(b v) c h w -> b v c h w", b=b, v=v_t)
+398c533
+<         # Compute and log image metrics
+---
+>         # ---------- 指标日志 ----------
+400,403c535,537
+<             ("context", "target_autoencoder", "target_render", "target_combined"), 
+<             (context_pred, target_autoencoder_pred, target_render_image_pred, target_combined_pred),
+<             (context_gt, target_autoencoder_gt, target_render_image_gt, target_combined_gt)
+<         ):
+---
+>                 ("context", "target_autoencoder", "target_render", "target_combined"),
+>                 (context_pred, target_autoencoder_pred, target_render_image_pred, target_combined_pred),
+>                 (context_gt, target_autoencoder_gt, target_render_image_gt, target_combined_gt)):
+407,408c541
+<                     rearrange(pred.image, "b v c h w -> (b v) c h w"),
+<                 )
+---
+>                     rearrange(pred.image, "b v c h w -> (b v) c h w"))
+411c544
+<         # Compute discriminator logits for generator losses
+---
+>         # ---------- 判别器 logits ----------
+413,415c546,547
+<             (self.context_losses, self.target_autoencoder_losses, self.target_combined_losses),
+<             (context_pred, target_autoencoder_pred, target_combined_pred),
+<         ):
+---
+>                 (self.context_losses, self.target_autoencoder_losses, self.target_combined_losses),
+>                 (context_pred, target_autoencoder_pred, target_combined_pred)):
+418c550,551
+<                 logits_fake = self.discriminator(rearrange(pred.image, "b v c h w -> (b v) c h w"))     # TODO allow any number of batch dimensions in discriminator
+---
+>                 logits_fake = self.discriminator(
+>                     rearrange(pred.image, "b v c h w -> (b v) c h w"))
+420,422c553,555
+<         
+<         # Compute and log loss for generator
+<         generator_loss = 0
+---
+> 
+>         # ---------- 生成器损失 ----------
+>         generator_loss = 0.
+424,428c557,566
+<             (self.gaussian_losses, self.context_losses, self.target_autoencoder_losses, self.target_render_image_losses, self.target_render_latent_losses, self.target_combined_losses),
+<             (gaussian_pred, context_pred, target_autoencoder_pred, target_render_image_pred, target_render_latent_pred, target_combined_pred),
+<             (None, context_gt, target_autoencoder_gt, target_render_image_gt, target_render_latent_gt, target_combined_gt)
+<         ):
+<             group_loss, loss_dict = loss_group.forward_generator(pred, gt, self.step_tracker.get_step(), self.last_layer_weight)
+---
+>                 (self.gaussian_losses, self.context_losses, self.target_autoencoder_losses,
+>                 self.target_render_image_losses, self.target_render_latent_losses, self.target_combined_losses),
+>                 (gaussian_pred, context_pred, target_autoencoder_pred,
+>                 target_render_image_pred, target_render_latent_pred, target_combined_pred),
+>                 (None, context_gt, target_autoencoder_gt,
+>                 target_render_image_gt, target_render_latent_gt, target_combined_gt)):
+>             if loss_group is None:
+>                 continue
+>             group_loss, loss_dict = loss_group.forward_generator(
+>                 pred, gt, self.step_tracker.get_step(), self.last_layer_weight)
+434c572,588
+<         self.log(f"loss/generator/total", generator_loss)
+---
+>         if self.gaussian_losses is not None:
+>             _, gaussian_loss_dict = self.gaussian_losses.forward_generator(
+>                 gaussian_pred, None, self.step_tracker.get_step(), self.last_layer_weight)
+>         else:
+>             log("gaussian_losses is None, skipping forward_generator")
+> 
+>         # ---------- 生成器反向 ----------
+>         if isinstance(generator_loss, Tensor) and not generator_loss.isnan().any():
+>             g_opt.zero_grad()
+>             self.manual_backward(generator_loss)
+>             self.clip_gradients(
+>                 g_opt,
+>                 gradient_clip_val=self.optimizer_cfg.generator.gradient_clip_val,
+>                 gradient_clip_algorithm=self.optimizer_cfg.generator.gradient_clip_algorithm)
+>             g_opt.step()
+>         else:
+>             warn(f"NaN generator_loss at step {self.step_tracker.get_step()}")
+436,450d589
+<         if isinstance(generator_loss, Tensor):
+<             if not generator_loss.isnan().any():
+<                 # Generator optimization step
+<                 g_opt.zero_grad()
+<                 self.manual_backward(generator_loss)
+<                 # Clip gradients manually (manual optimization)
+<                 self.clip_gradients(
+<                     g_opt, 
+<                     gradient_clip_val=self.optimizer_cfg.generator.gradient_clip_val, 
+<                     gradient_clip_algorithm=self.optimizer_cfg.generator.gradient_clip_algorithm
+<                 )
+<                 g_opt.step()
+<             else:
+<                 warn(f"Encountered nan generator loss in iteration {self.step_tracker.get_step()}")
+<         
+452a592
+>         # ---------- 判别器损失 & 反向 ----------
+454d593
+<             # Second discriminator optimization
+456,457c595
+< 
+<             discriminator_loss = 0
+---
+>             discriminator_loss = 0.
+459,462c597,599
+<                 (self.context_losses, self.target_autoencoder_losses, self.target_combined_losses),
+<                 (context_pred, target_autoencoder_pred, target_combined_pred),
+<                 (context_gt, target_autoencoder_gt, target_combined_gt)
+<             ):  
+---
+>                     (self.context_losses, self.target_autoencoder_losses, self.target_combined_losses),
+>                     (context_pred, target_autoencoder_pred, target_combined_pred),
+>                     (context_gt, target_autoencoder_gt, target_combined_gt)):
+464d600
+<                     # TODO allow any number of batch dimensions in discriminator
+466,467c602,605
+<                     logits_fake = self.discriminator(rearrange(pred.image.detach(), "b v c h w -> (b v) c h w"))    # NOTE detach here
+<                     logits_real = self.discriminator(rearrange(gt.image, "b v c h w -> (b v) c h w"))
+---
+>                     logits_fake = self.discriminator(
+>                         rearrange(pred.image.detach(), "b v c h w -> (b v) c h w"))
+>                     logits_real = self.discriminator(
+>                         rearrange(gt.image, "b v c h w -> (b v) c h w"))
+470c608,609
+<                     group_loss, loss_dict = loss_group.forward_discriminator(pred, gt, self.step_tracker.get_step())
+---
+>                     group_loss, loss_dict = loss_group.forward_discriminator(
+>                         pred, gt, self.step_tracker.get_step())
+476c615,626
+<             self.log(f"loss/discriminator/total", discriminator_loss)
+---
+>             self.log("loss/discriminator/total", discriminator_loss)
+> 
+>             if isinstance(discriminator_loss, Tensor) and not discriminator_loss.isnan().any():
+>                 d_opt.zero_grad()
+>                 self.manual_backward(discriminator_loss)
+>                 self.clip_gradients(
+>                     d_opt,
+>                     gradient_clip_val=self.optimizer_cfg.discriminator.gradient_clip_val,
+>                     gradient_clip_algorithm=self.optimizer_cfg.discriminator.gradient_clip_algorithm)
+>                 d_opt.step()
+>             else:
+>                 warn(f"NaN discriminator_loss at step {self.step_tracker.get_step()}")
+478,492d627
+<             if isinstance(discriminator_loss, Tensor):
+<                 if not discriminator_loss.isnan().any():
+<                     # Discriminator optimization step
+<                     d_opt.zero_grad()
+<                     self.manual_backward(discriminator_loss)
+<                     # Clip gradients manually (manual optimization)
+<                     self.clip_gradients(
+<                         d_opt, 
+<                         gradient_clip_val=self.optimizer_cfg.discriminator.gradient_clip_val, 
+<                         gradient_clip_algorithm=self.optimizer_cfg.discriminator.gradient_clip_algorithm
+<                     )
+<                     d_opt.step()
+<                 else:
+<                     warn(f"Encountered nan discriminator loss in iteration {self.step_tracker.get_step()}")
+<             
+497c632
+<         # Print progress
+---
+>         # ---------- 进度 & scheduler ----------
+499,502c634,637
+<             progress = f"train step {self.step_tracker.get_step()}; " \
+<                 f"scene = {batch['scene']}; " \
+<                 f"context = {batch['context']['index'].tolist()}; " \
+<                 f"generator loss = {generator_loss:.6f}; "
+---
+>             progress = (f"train step {self.step_tracker.get_step()}; "
+>                         f"scene = {batch['scene']}; "
+>                         f"context = {batch['context']['index'].tolist()}; "
+>                         f"generator loss = {generator_loss:.6f}")
+504,505c639,641
+<                 progress += f"discriminator loss = {discriminator_loss:.6f}"
+<             print(progress)
+---
+>                 progress += f"; discriminator loss = {discriminator_loss:.6f}"
+> 
+>         self.log("loss/generator/total", generator_loss, prog_bar=True)
+507d642
+<         # Do all scheduler steps
+509c644
+<         if schedulers:  # schedulers is not None and not empty list
+---
+>         if schedulers:
+511,512c646,647
+<                 for scheduler in schedulers:
+<                     scheduler.step()
+---
+>                 for sch in schedulers:
+>                     sch.step()
+515,568d649
+<             
+< 
+<     def test_step(self, batch, batch_idx):
+<         batch: BatchedExample = self.data_shim(batch)
+< 
+<         b, v = batch["target"]["image"].shape[:2]
+<         size = self.get_scaled_size(self.scale_factor, batch["target"]["image"].shape[-2:])
+< 
+<         assert b == 1
+<         if batch_idx % 100 == 0:
+<             print(f"Test step {batch_idx:0>6}.")
+< 
+<         # Render Gaussians.
+<         if self.encode_latents:
+<             with self.benchmarker.time("autoencoder_encoder", num_calls=batch["context"]["image"].shape[1]):
+<                 posterior = self.autoencoder.encode(batch["context"]["image"])
+<                 context_latents = posterior.sample()
+<         else:
+<             context_latents = None
+< 
+<         with self.benchmarker.time("encoder"):
+<             gaussians: VariationalGaussians = self.encoder(
+<                 batch["context"],
+<                 self.step_tracker.get_step(),
+<                 features=context_latents,
+<                 deterministic=False,
+<             )
+<         with self.benchmarker.time("decoder", num_calls=v):
+<             output = self.decoder.forward(
+<                 gaussians.sample() if self.variational in ("gaussians", "none") else gaussians.flatten(),     # Sample from variational Gaussians
+<                 batch["target"]["extrinsics"],
+<                 batch["target"]["intrinsics"],
+<                 batch["target"]["near"],
+<                 batch["target"]["far"],
+<                 size,
+<             )
+<         
+<         with self.benchmarker.time("autoencoder_decoder", num_calls=v):
+<             latent_sample = output.feature_posterior.sample()
+<             # Invert supersampling
+<             z = self.rescale(latent_sample, Fraction(1, self.supersampling_factor))
+<             if self.autoencoder.expects_skip:
+<                 skip_z = torch.cat((output.color.detach(), latent_sample), dim=-3) if self.autoencoder.expects_skip_extra else latent_sample
+<             else:
+<                 skip_z = None
+<             target_pred_image = self.autoencoder.decode(z, skip_z)
+< 
+<         # Save images.
+<         (scene,) = batch["scene"]
+<         context_index_str = "_".join(map(str, sorted(batch["context"]["index"][0].tolist())))
+<         name = get_cfg()["wandb"]["name"]
+<         path = self.test_cfg.output_path / name
+<         for index, color in zip(batch["target"]["index"][0], target_pred_image[0]):
+<             save_image(color, path / scene / context_index_str / f"color/{index:0>6}.png")
+570,575c651,674
+<     def on_test_end(self) -> None:
+<         name = get_cfg()["wandb"]["name"]
+<         self.benchmarker.dump(self.test_cfg.output_path / name / "benchmark.json")
+<         self.benchmarker.dump_memory(
+<             self.test_cfg.output_path / name / "peak_memory.json"
+<         )
+---
+>     # 粘到 ModelWrapper 类里
+>     def build_spiral_camera(self, b, azim_deg, elev_deg=20., dist=2.):
+>         """返回虚拟相机外参 tensor [b, 4, 4]"""
+>         import math
+>         azim = math.radians(azim_deg)
+>         elev = math.radians(elev_deg)
+>         cam_pos = torch.tensor([dist * math.cos(elev) * math.sin(azim),
+>                                 dist * math.sin(elev),
+>                                 dist * math.cos(elev) * math.cos(azim)],
+>                               device=self.device)
+>         target = torch.zeros(3, device=self.device)
+>         up = torch.tensor([0., 1., 0.], device=self.device)
+> 
+>         # look-at
+>         z = (cam_pos - target) / torch.norm(cam_pos - target)
+>         x = torch.cross(up, z)
+>         x /= x.norm()
+>         y = torch.cross(z, x)
+>         pose = torch.eye(4, device=self.device)
+>         pose[:3, 0] = x
+>         pose[:3, 1] = y
+>         pose[:3, 2] = z
+>         pose[:3, 3] = cam_pos
+>         return pose.unsqueeze(0).repeat(b, 1, 1)   # [b,4,4]
+576a676
+>     # ---------------- 验证 / 测试 / 视频 --------------- #
+578,580c678
+<     def validation_step(self, batch, batch_idx):
+<         batch: BatchedExample = self.data_shim(batch)
+< 
+---
+>     def validation_step(self, batch: BatchedExample, batch_idx: int):
+590d687
+< 
+593,598c690,692
+<         pred = {
+<             "low": {},
+<             "high": {}
+<         }
+<         # Render Gaussians.
+<         # Probabilistic pass
+---
+>         pred = {"low": {}, "high": {}}
+> 
+>         # ---------- 1. 概率前向 ----------
+605c699
+<         gaussians_probabilistic: VariationalGaussians = self.encoder(
+---
+>         gaussians_prob: VariationalGaussians = self.encoder(
+611,612c705,706
+<         output_probabilistic = self.decoder.forward(
+<             gaussians_probabilistic.sample() if self.variational in ("gaussians", "none") else gaussians_probabilistic.flatten(),
+---
+>         output_prob = self.decoder.forward(
+>             gaussians_prob.sample() if self.variational in ("gaussians", "none") else gaussians_prob.flatten(),
+619,620c713,714
+<         pred["low"]["probabilistic"] = output_probabilistic.color[0]
+<         latent_probabilistic = output_probabilistic.feature_posterior.sample()[0]
+---
+>         pred["low"]["probabilistic"] = output_prob.color[0]
+>         latent_prob = output_prob.feature_posterior.sample()[0]
+622,623c716,717
+<         # Deterministic pass
+<         gaussians_deterministic: VariationalGaussians = self.encoder(
+---
+>         # ---------- 2. 确定性前向 ----------
+>         gaussians_det: VariationalGaussians = self.encoder(
+629,630c723,724
+<         output_deterministic = self.decoder.forward(
+<             gaussians_deterministic.mode() if self.variational in ("gaussians", "none") else gaussians_probabilistic.flatten(),
+---
+>         output_det = self.decoder.forward(
+>             gaussians_det.mode() if self.variational in ("gaussians", "none") else gaussians_prob.flatten(),
+637,638c731,732
+<         pred["low"]["deterministic"] = output_deterministic.color[0]
+<         latent_deterministic = output_deterministic.feature_posterior.mode()[0]
+---
+>         pred["low"]["deterministic"] = output_det.color[0]
+>         latent_det = output_det.feature_posterior.mode()[0]
+640,641c734,735
+<         latents = torch.cat((latent_probabilistic, latent_deterministic))
+<         # Invert supersampling
+---
+>         # ---------- 3. 高分辨率解码 ----------
+>         latents = torch.cat([latent_prob, latent_det])
+642a737
+> 
+645,646c740,741
+<                 colors = torch.cat((pred["low"]["probabilistic"], pred["low"]["deterministic"]))
+<                 skip_z = torch.cat((colors, latents), dim=-3)   # -3 = channel dimension
+---
+>                 colors = torch.cat([pred["low"]["probabilistic"], pred["low"]["deterministic"]])
+>                 skip_z = torch.cat([colors, latents], dim=-3)
+650a746
+> 
+654c750
+<         # Compute validation metrics.
+---
+>         # ---------- 4. 指标计算 ----------
+656c752
+<         rgb_low_res_gt = self.rescale(rgb_high_res_gt, self.scale_factor)
+---
+>         rgb_low_res_gt  = self.rescale(rgb_high_res_gt, self.scale_factor)
+659d754
+<             # Skip lpips and ssim for low resolution, because too small
+661a757
+> 
+664c760
+<                 (compute_psnr, compute_lpips, compute_ssim)
+---
+>                 (compute_psnr, compute_lpips, compute_ssim),
+669,672c765,766
+<         # Construct comparison image.
+<         comparison = {}
+<         # Skip high resolution context images and labels for low resolution comparison
+<         comparison["low"] = add_border(
+---
+>         # ---------- 5. 可视化 ----------
+>         comparison_low = add_border(
+677c771
+<                 gap=1
+---
+>                 gap=1,
+679c773
+<             border=1
+---
+>             border=1,
+681,706c775
+<         comparison["high"] = add_border(hcat(
+<             add_label(vcat(*batch["context"]["image"][0]), "Context"),
+<             add_label(vcat(*rgb_high_res_gt), "Target (Ground Truth)"),
+<             add_label(vcat(*pred["high"]["probabilistic"]), "Target (Probabilistic)"),
+<             add_label(vcat(*pred["high"]["deterministic"]), "Target (Deterministic)"),
+<         ))
+<         for res, comp in comparison.items():
+<             self.logger.log_image(
+<                 f"comparison_{res}",
+<                 [prep_image(comp)],
+<                 step=self.step_tracker.get_step(),
+<                 caption=batch["scene"],
+<             )
+< 
+<         # Render projections and construct projection image.
+<         # These are disabled for now, since RE10k scenes are effectively unbounded.
+<         # TODO can we adapt this for latent space?
+<         """
+<         projections = vcat(
+<             hcat(
+<                 *render_projections(
+<                     gaussians_probabilistic,
+<                     256,
+<                     extra_label="(Probabilistic)",
+<                 )[0]
+<             ),
+---
+>         comparison_high = add_border(
+708,712c777,781
+<                 *render_projections(
+<                     gaussians_deterministic, 256, extra_label="(Deterministic)"
+<                 )[0]
+<             ),
+<             align="left",
+---
+>                 add_label(vcat(*batch["context"]["image"][0]), "Context"),
+>                 add_label(vcat(*rgb_high_res_gt), "Target (Ground Truth)"),
+>                 add_label(vcat(*pred["high"]["probabilistic"]), "Target (Probabilistic)"),
+>                 add_label(vcat(*pred["high"]["deterministic"]), "Target (Deterministic)"),
+>             )
+713a783
+> 
+715,717c785
+<             "projection",
+<             [prep_image(add_border(projections))],
+<             step=self.step_tracker.get_step(),
+---
+>             "comparison_low", [prep_image(comparison_low)], step=self.step_tracker.get_step(), caption=batch["scene"]
+719,722d786
+<         """
+< 
+<         # Draw cameras.
+<         cameras = hcat(*render_cameras(batch, 256))
+724c788
+<             "cameras", [prep_image(add_border(cameras))], step=self.step_tracker.get_step()
+---
+>             "comparison_high", [prep_image(comparison_high)], step=self.step_tracker.get_step(), caption=batch["scene"]
+727,734c791,793
+<         # TODO adapt encoder_visualizer
+<         if self.encoder_visualizer is not None:
+<             for k, image in self.encoder_visualizer.visualize(
+<                 batch["context"], 
+<                 self.step_tracker.get_step(),
+<                 features=posterior.mode() if self.encode_latents else None
+<             ).items():
+<                 self.logger.log_image(k, [prep_image(image)], step=self.step_tracker.get_step())
+---
+>         # ---------- 6. 相机轨迹视频 ----------
+>         cameras = hcat(*render_cameras(batch, 256))
+>         self.logger.log_image("cameras", [prep_image(add_border(cameras))], step=self.step_tracker.get_step())
+736c795
+<         # Run video validation step.
+---
+>         # ---------- 7. 视频生成 ----------
+744,832c803,807
+<     @rank_zero_only
+<     def render_video_wobble(self, batch: BatchedExample) -> None:
+<         # Two views are needed to get the wobble radius.
+<         _, v, _, _ = batch["context"]["extrinsics"].shape
+<         if v != 2:
+<             return
+< 
+<         def trajectory_fn(t):
+<             origin_a = batch["context"]["extrinsics"][:, 0, :3, 3]
+<             origin_b = batch["context"]["extrinsics"][:, 1, :3, 3]
+<             delta = (origin_a - origin_b).norm(dim=-1)
+<             extrinsics = generate_wobble(
+<                 batch["context"]["extrinsics"][:, 0],
+<                 delta * 0.25,
+<                 t,
+<             )
+<             intrinsics = repeat(
+<                 batch["context"]["intrinsics"][:, 0],
+<                 "b i j -> b v i j",
+<                 v=t.shape[0],
+<             )
+<             return extrinsics, intrinsics
+< 
+<         return self.render_video_generic(batch, trajectory_fn, "wobble", num_frames=60)
+< 
+<     @rank_zero_only
+<     def render_video_interpolation(self, batch: BatchedExample) -> None:
+<         _, v, _, _ = batch["context"]["extrinsics"].shape
+< 
+<         def trajectory_fn(t):
+<             extrinsics = interpolate_extrinsics(
+<                 batch["context"]["extrinsics"][0, 0],
+<                 batch["context"]["extrinsics"][0, 1]
+<                 if v == 2
+<                 else batch["target"]["extrinsics"][0, 0],
+<                 t,
+<             )
+<             intrinsics = interpolate_intrinsics(
+<                 batch["context"]["intrinsics"][0, 0],
+<                 batch["context"]["intrinsics"][0, 1]
+<                 if v == 2
+<                 else batch["target"]["intrinsics"][0, 0],
+<                 t,
+<             )
+<             return extrinsics[None], intrinsics[None]
+< 
+<         return self.render_video_generic(batch, trajectory_fn, "rgb")
+< 
+<     @rank_zero_only
+<     def render_video_interpolation_exaggerated(self, batch: BatchedExample) -> None:
+<         # Two views are needed to get the wobble radius.
+<         _, v, _, _ = batch["context"]["extrinsics"].shape
+<         if v != 2:
+<             return
+< 
+<         def trajectory_fn(t):
+<             origin_a = batch["context"]["extrinsics"][:, 0, :3, 3]
+<             origin_b = batch["context"]["extrinsics"][:, 1, :3, 3]
+<             delta = (origin_a - origin_b).norm(dim=-1)
+<             tf = generate_wobble_transformation(
+<                 delta * 0.5,
+<                 t,
+<                 5,
+<                 scale_radius_with_t=False,
+<             )
+<             extrinsics = interpolate_extrinsics(
+<                 batch["context"]["extrinsics"][0, 0],
+<                 batch["context"]["extrinsics"][0, 1]
+<                 if v == 2
+<                 else batch["target"]["extrinsics"][0, 0],
+<                 t * 5 - 2,
+<             )
+<             intrinsics = interpolate_intrinsics(
+<                 batch["context"]["intrinsics"][0, 0],
+<                 batch["context"]["intrinsics"][0, 1]
+<                 if v == 2
+<                 else batch["target"]["intrinsics"][0, 0],
+<                 t * 5 - 2,
+<             )
+<             return extrinsics @ tf, intrinsics[None]
+< 
+<         return self.render_video_generic(
+<             batch,
+<             trajectory_fn,
+<             "interpolation_exagerrated",
+<             num_frames=300,
+<             smooth=False,
+<             loop_reverse=False,
+<         )
+---
+>     def test_step(self, batch: BatchedExample, batch_idx: int) -> None:
+>         batch = self.data_shim(batch)
+>         b, v = batch["target"]["image"].shape[:2]
+>         size = self.get_scaled_size(1.0, batch["target"]["image"].shape[-2:])
+>         assert b == 1
+834,844c809
+<     @rank_zero_only
+<     def render_video_generic(
+<         self,
+<         batch: BatchedExample,
+<         trajectory_fn: TrajectoryFn,
+<         name: str,
+<         num_frames: int = 30,
+<         smooth: bool = True,
+<         loop_reverse: bool = True,
+<     ) -> None:
+<         # Render probabilistic estimate of scene.
+---
+>         # ---------- 1. 编码 ----------
+846a812,814
+>             context_latents = posterior.sample()
+>         else:
+>             context_latents = None
+848,855c816,818
+<         gaussians_prob: VariationalGaussians = self.encoder(
+<             batch["context"], 
+<             self.step_tracker.get_step(),
+<             features=posterior.sample() if self.encode_latents else None,
+<             deterministic=False
+<         )
+<         gaussians_det: VariationalGaussians = self.encoder(
+<             batch["context"], 
+---
+>         # ---------- 2. 渲染 ----------
+>         gaussians: VariationalGaussians = self.encoder(
+>             batch["context"],
+857,874c820,821
+<             features=posterior.mode() if self.encode_latents else None,
+<             deterministic=True
+<         )
+< 
+<         t = torch.linspace(0, 1, num_frames, dtype=torch.float32, device=self.device)
+<         if smooth:
+<             t = (torch.cos(torch.pi * (t + 1)) + 1) / 2
+< 
+<         extrinsics, intrinsics = trajectory_fn(t)
+<         size = self.get_scaled_size(self.scale_factor, batch["context"]["image"].shape[-2:])
+< 
+<         # TODO: Interpolate near and far planes?
+<         near = repeat(batch["context"]["near"][:, 0], "b -> b v", v=num_frames)
+<         far = repeat(batch["context"]["far"][:, 0], "b -> b v", v=num_frames)
+< 
+<         output_prob = self.decoder.forward(
+<             gaussians_prob.sample() if self.variational in ("gaussians", "none") else gaussians_prob.flatten(),
+<             extrinsics, intrinsics, near, far, size, "depth"
+---
+>             features=context_latents,
+>             deterministic=False,
+876,878c823,829
+<         output_det = self.decoder.forward(
+<             gaussians_det.mode() if self.variational in ("gaussians", "none") else gaussians_prob.flatten(),
+<             extrinsics, intrinsics, near, far, size, "depth"
+---
+>         output = self.decoder.forward(
+>             gaussians.sample() if self.variational in ("gaussians", "none") else gaussians.flatten(),
+>             batch["target"]["extrinsics"],
+>             batch["target"]["intrinsics"],
+>             batch["target"]["near"],
+>             batch["target"]["far"],
+>             size,
+880,881d830
+<         latent_prob = output_prob.feature_posterior.sample()
+<         latent_det = output_prob.feature_posterior.mode()
+882a832,889
+>         # ---------- 3. 解码 ----------
+>         latent_sample = output.feature_posterior.sample()
+>         z = self.rescale(latent_sample, Fraction(1, self.supersampling_factor))
+> 
+>         # 1. 投影到 VAE 期望的通道数
+>         if z.shape[-3] != self.autoencoder.latent_channels:
+>             # 临时 1×1 卷积，权重随推理即可（也可换成 nn.Conv2d 注册）
+>             z = torch.nn.functional.conv2d(
+>                 z,
+>                 weight=torch.randn(
+>                     self.autoencoder.latent_channels,
+>                     z.shape[-3], 1, 1,
+>                     device=z.device,
+>                     dtype=z.dtype,
+>                 ),
+>                 bias=None,
+>                 stride=1,
+>                 padding=0,
+>             )
+> 
+>         skip_z = (
+>             torch.cat((output.color.detach(), latent_sample), dim=-3)
+>             if self.autoencoder.expects_skip_extra
+>             else latent_sample
+>         ) if self.autoencoder.expects_skip else None
+> 
+>         # 2. 后续插值、解码保持原逻辑
+>         spatial_ndim = z.ndim - 2
+>         spatial = z.shape[-spatial_ndim:]
+>         target_spatial = tuple(round(s * 4) for s in spatial)
+>         mode = "trilinear" if spatial_ndim == 3 else "bilinear"
+> 
+>         z_big = torch.nn.functional.interpolate(
+>             z, size=target_spatial, mode=mode, align_corners=False
+>         )
+>         print("z_big.shape:", z_big.shape)
+>         if skip_z is None:
+>             torch.cuda.empty_cache()
+>             # 5 维已压成 4 维 (B,V,C,H,W)
+>             b, v, c, h, w = z_big.shape
+>             tile = self.cfg.test.decode_tile          # 读配置
+>             if tile <= 0 or h <= tile and w <= tile:  # 整图模式（A100）
+>                 with torch.no_grad():
+>                     target_pred_big = self.autoencoder.decode(z_big, None).sample
+>             else:                                       # 分块模式（小卡）
+>                 target_pred_big = torch.zeros_like(z_big[:, :, :3])
+>                 for i in range(0, h, tile):
+>                     for j in range(0, w, tile):
+>                         z_tile = z_big[:, :, :, i:i+tile, j:j+tile]
+>                         with torch.no_grad():
+>                             pred_tile = self.autoencoder.decode(z_tile, None).sample
+>                         target_pred_big[:, :, :, i:i+tile, j:j+tile] = pred_tile
+>                         del pred_tile
+>                 torch.cuda.empty_cache()
+> 
+>         # 3. 提亮
+>         target_pred_image = (target_pred_image - target_pred_image.min()).clamp_min(0) / \
+>                             (target_pred_image.max() - target_pred_image.min()).clamp_min(1e-5)
+884,956c891,897
+<         latents = torch.cat((latent_prob, latent_det))
+<         # Invert supersampling
+<         z = self.rescale(latents, Fraction(1, self.supersampling_factor))
+<         if self.autoencoder.expects_skip:
+<             if self.autoencoder.expects_skip_extra:
+<                 colors = torch.cat((output_prob.color, output_det.color))
+<                 skip_z = torch.cat((colors, latents), dim=-3)   # -3 = channel dimension
+<             else:
+<                 skip_z = latents
+<         else:
+<             skip_z = None
+<         dec = self.autoencoder.decode(z, skip_z)
+< 
+<         image_prob, image_det = dec.tensor_split(2)
+<         pred = {}
+<         for mode, output, images in zip(("probabilistic", "deterministic"), (output_prob, output_det), (image_prob, image_det)):
+<             masks = repeat(self.rescale(output.mask, get_inv(self.scale_factor))[0].unsqueeze(1), "v () h w -> v c h w", c=3)
+<             depths = apply_depth_color_map(self.rescale(output.depth, get_inv(self.scale_factor))[0])
+<             pred[mode] = [vcat(image, mask, depth) for image, mask, depth in zip(images[0], masks, depths)]
+< 
+<         images = [
+<             add_border(
+<                 hcat(
+<                     add_label(image_prob, "Probabilistic"),
+<                     add_label(image_det, "Deterministic"),
+<                 )
+<             )
+<             for image_prob, image_det in zip(pred["probabilistic"], pred["deterministic"])
+<         ]
+< 
+<         video = torch.stack(images)
+<         video = (video.clip(min=0, max=1) * 255).type(torch.uint8).cpu().numpy()
+<         if loop_reverse:
+<             video = pack([video, video[::-1][1:-1]], "* c h w")[0]
+<         visualizations = {
+<             f"video/{name}": wandb.Video(video[None], fps=30, format="mp4")
+<         }
+< 
+<         # Since the PyTorch Lightning doesn't support video logging, log to wandb directly.
+<         try:
+<             wandb.log(visualizations)
+<         except Exception:
+<             assert isinstance(self.logger, LocalLogger)
+<             for key, value in visualizations.items():
+<                 tensor = value._prepare_video(value.data)
+<                 clip = mpy.ImageSequenceClip(list(tensor), fps=value._fps)
+<                 dir = LOG_PATH / key
+<                 dir.mkdir(exist_ok=True, parents=True)
+<                 clip.write_videofile(
+<                     str(dir / f"{self.step_tracker.get_step():0>6}.mp4"), logger=None
+<                 )
+< 
+<     @staticmethod
+<     def get_optimizer(
+<         optimizer_cfg: GeneratorOptimizerCfg | DiscriminatorOptimizerCfg,
+<         params: Iterator[Parameter] | list[Dict[str, Any]],
+<         lr: float
+<     ) -> optim.Optimizer:
+<         return getattr(optim, optimizer_cfg.name)(
+<             params,
+<             lr=lr,
+<             **(optimizer_cfg.kwargs if optimizer_cfg.kwargs is not None else {})       
+<         )
+< 
+<     @staticmethod
+<     def get_lr_scheduler(
+<         opt: optim.Optimizer, 
+<         lr_scheduler_cfg: LRSchedulerCfg
+<     ) -> optim.lr_scheduler.LRScheduler:
+<         return getattr(optim.lr_scheduler, lr_scheduler_cfg.name)(
+<             opt,
+<             **(lr_scheduler_cfg.kwargs if lr_scheduler_cfg.kwargs is not None else {})     
+<         )
+---
+>         # ---------- 4. 保存 ----------
+>         (scene,) = batch["scene"]
+>         context_index_str = "_".join(map(str, sorted(batch["context"]["index"][0].tolist())))
+>         path = Path(self.test_cfg.output_path) / "debug" / scene / context_index_str / "color"
+>         path.mkdir(parents=True, exist_ok=True)
+>         for index, color in zip(batch["target"]["index"][0], target_pred_image[0]):
+>             save_image(color, path / f"{index:0>6}.png")
+958,984c899,902
+<     def configure_optimizers(self):
+<         optimizers = []
+<         schedulers = []
+<         # Generator optimizer
+<         g_opt = self.get_optimizer(
+<             self.optimizer_cfg.generator,
+<             [
+<                 {"params": chain(self.encoder.parameters(), self.decoder.parameters())},
+<                 {"params": self.autoencoder.parameters(), "lr": self.autoencoder_lr} \
+<                     | (self.optimizer_cfg.generator.autoencoder_kwargs if self.optimizer_cfg.generator.autoencoder_kwargs is not None else {})
+<             ],
+<             self.generator_lr
+<         )
+<         optimizers.append(g_opt)
+<         # Generator scheduler
+<         if self.optimizer_cfg.generator.scheduler is not None:
+<             schedulers.append(self.get_lr_scheduler(g_opt, self.optimizer_cfg.generator.scheduler))
+<         
+<         # Discriminator optimizer
+<         if self.discriminator is not None:
+<             d_opt = self.get_optimizer(self.optimizer_cfg.discriminator, self.discriminator.parameters(), self.discriminator_lr)
+<             optimizers.append(d_opt)
+<             # Discriminator scheduler
+<             if self.optimizer_cfg.discriminator.scheduler is not None:
+<                 schedulers.append(self.get_lr_scheduler(d_opt, self.optimizer_cfg.discriminator.scheduler))
+<         
+<         return optimizers, schedulers
+---
+>     def on_test_end(self) -> None:
+>         name = get_cfg()["wandb"]["name"]
+>         self.benchmarker.dump(self.test_cfg.output_path / name / "benchmark.json")
+>         self.benchmarker.dump_memory(self.test_cfg.output_path / name / "peak_memory.json")
+\ No newline at end of file
+diff -r original/src/model/types.py modified/src/model/types.py
+8a9,16
+> # @dataclass
+> # class Gaussians:
+> #     means: Float[Tensor, "batch gaussian dim"]
+> #     covariances: Float[Tensor, "batch gaussian dim dim"]
+> #     opacities: Float[Tensor, "batch gaussian"]
+> #     color_harmonics: Float[Tensor, "batch gaussian 3 d_color_sh"] | None = None
+> #     feature_harmonics: Float[Tensor, "batch gaussian channels d_feature_sh"] | None = None
+> 
+13a22
+>     scales: Float[Tensor, "batch gaussian dim"]  # ✅ 加这一行
+21a31,32
+>     # def _to_gaussians(self, feature_harmonics: Float[Tensor, "batch gaussian channels d_feature_sh"]) -> Gaussians:
+>     #     return Gaussians(self.means, self.covariances, self.opacities, self.color_harmonics, feature_harmonics)
+23c34,41
+<         return Gaussians(self.means, self.covariances, self.opacities, self.color_harmonics, feature_harmonics)
+---
+>         return Gaussians(
+>             means=self.means,
+>             covariances=self.covariances,
+>             opacities=self.opacities,
+>             scales=self.scales, 
+>             color_harmonics=self.color_harmonics,
+>             feature_harmonics=feature_harmonics,
+>         )
+Only in modified/: t_num_rays 降到 128 甚至 64 再试：
+Only in modified/: 
+Traceback (most recent call last):
+  File 
+Only in modified/: update.txt
+Only in modified/: venv310
+Only in modified/: .vscode

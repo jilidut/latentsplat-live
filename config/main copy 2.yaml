@@ -1,0 +1,161 @@
+# config/main.yaml
+defaults:
+  - dataset: re10k
+  - optional dataset/view_sampler_dataset_specific_config: ${dataset/view_sampler}_${dataset}
+  - model/autoencoder: kl_f8
+  - model/encoder: epipolar
+  - model/decoder: splatting_cuda
+  - optional model/discriminator: null
+
+model:
+  autoencoder:
+      skip_connections: false
+  supersampling_factor: 1
+  encode_latents: false
+  variational: none
+  
+
+freeze:
+  autoencoder: false
+  encoder: false
+  decoder: false
+  discriminator: false
+
+hydra:
+  run:
+    dir: ./outputs/${now:%Y-%m-%d}/${now:%H-%M-%S.%f}
+  job_logging:
+    version: 1
+    formatters:
+      simple:
+        format: "[%(asctime)s] %(levelname)s: %(message)s"
+    handlers:
+      console:
+        class: logging.StreamHandler
+        formatter: simple
+        stream: ext://sys.stdout
+      file:
+        class: logging.FileHandler
+        formatter: simple
+        filename: ${hydra:run.dir}/run.log
+    root:
+      level: INFO
+      handlers: [console, file]
+
+wandb:
+  project: latentsplat
+  entity: placeholder
+  name: "latentsplat_200k_${now:%Y%m%d_%H%M%S}"
+  mode: online
+  activated: false
+  tags: ["a100", "200k_steps", "final_training"]
+
+mode: train
+
+dataset:
+  overfit_to_scene: null
+
+
+data_loader:
+  # Avoid having to spin up new processes to print out visualizations.
+  train:
+    num_workers: 16
+    persistent_workers: true
+    batch_size: 2
+    seed: 1234
+    prefetch_factor: 16
+    pin_memory: true
+  test:
+    num_workers: 4
+    persistent_workers: false
+    batch_size: 1
+    seed: 2345
+    pin_memory: true
+  val:
+    num_workers: 1
+    persistent_workers: true
+    batch_size: 1
+    seed: 3456
+    pin_memory: true
+
+optimizer:
+  generator:
+    name: Adam
+    autoencoder_lr: 9.0e-6 # orig 4.5e-6 but doubled because of 2 context views
+    scale_autoencoder_lr: true
+    lr: 1.5e-4
+    scale_lr: false
+    autoencoder_kwargs:
+      betas: [0.5, 0.9]
+    scheduler:
+      name: LinearLR
+      kwargs:
+        start_factor: 5.e-4
+        total_iters: 2000
+    gradient_clip_val: 0.5
+  discriminator:
+    name: Adam
+    lr: 9.0e-6 # orig 4.5e-6 but doubled because of 2 context views
+    scale_lr: true
+    kwargs:
+      betas: [0.5, 0.9]
+
+checkpointing:
+  load: null
+  resume: false
+  every_n_train_steps: 2500
+  save_top_k: -1
+
+train:
+  depth_mode: null
+  step_offset: 0
+  extended_visualization: false
+  # extended_visualization: true
+  video_interpolation: false
+  # video_interpolation: true
+  video_wobble: false
+  # video_wobble: true
+
+test:
+  output_path: outputs/test
+  compute_metrics: true
+
+seed: 111123  # 全局随机种子
+
+trainer:
+  max_steps: 200_001
+  val_check_interval: 250
+  log_every_n_steps: 50
+  devices: 1
+  strategy: auto
+  # devices: 2
+  # strategy: ddp
+  enable_progress_bar: false
+  num_sanity_val_steps: 0        # 去掉训练前验证条
+  limit_val_batches: 0  # 整个训练不跑验证（若还想验证设 1）
+
+loss:
+  gaussian: null
+  context: null
+#    nll: []
+#    generator: ...
+#    discriminator: ...
+  target:
+    autoencoder: null
+    render:
+      latent: null
+      image: null
+    combined: null
+  # gsu:
+  #   geom_sem_contrast:
+  #     weight: 0.2
+  #     temperature: 0.1
+  #   unc_sem_couple:
+  #     weight: 0.3
+  gsu:
+    geom_sem_contrast:
+      weight: 0
+      temperature: 0
+    unc_sem_couple:
+      weight: 0
+

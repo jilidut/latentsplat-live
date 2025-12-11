@@ -36,22 +36,10 @@ class ImageSelfAttention(nn.Module):
             (pe := PositionalEncoding(cfg.num_octaves)),
             nn.Linear(pe.d_out(2), cfg.d_token),
         )
-        # self.patch_embedder = nn.Sequential(
-        #     nn.Conv2d(d_in, cfg.d_token, cfg.patch_size, cfg.patch_size),
-        #     nn.ReLU(),
-        # )
         self.patch_embedder = nn.Sequential(
-            nn.Conv2d(d_in, cfg.d_token, kernel_size=cfg.patch_size, stride=1,
-                    padding=cfg.patch_size // 2),  # ← 关键
+            nn.Conv2d(d_in, cfg.d_token, cfg.patch_size, cfg.patch_size),
             nn.ReLU(),
         )
-
-        self.resampler = nn.ConvTranspose2d(
-            cfg.d_token, d_out,
-            kernel_size=cfg.patch_size, stride=1,
-            padding=cfg.patch_size // 2,  # ← 关键
-        )
-
         self.transformer = Transformer(
             cfg.d_token,
             cfg.num_layers,
@@ -59,12 +47,12 @@ class ImageSelfAttention(nn.Module):
             cfg.d_dot,
             cfg.d_mlp,
         )
-        # self.resampler = nn.ConvTranspose2d(
-        #     cfg.d_token,
-        #     d_out,
-        #     cfg.patch_size,
-        #     cfg.patch_size,
-        # )
+        self.resampler = nn.ConvTranspose2d(
+            cfg.d_token,
+            d_out,
+            cfg.patch_size,
+            cfg.patch_size,
+        )
 
     def forward(
         self,

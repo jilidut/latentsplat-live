@@ -1,5 +1,5 @@
 # @package _global_
-
+#config/experiment/re10k.yaml
 defaults:
   - override /dataset: re10k
   - override /model/autoencoder: kl_f8_skip
@@ -24,6 +24,8 @@ loss:
         nll:
           - {name: mse, weight: 10}
           - {name: lpips, weight: 0.5, apply_after_step: 50_000}
+          # - {name: geom_sem_contrast, weight: 0.02, temperature: 0.1, sample_k: 2048, chunk_size: 1024, apply_after_step: 0}
+          # - {name: unc_sem_couple, weight: 0.005, apply_after_step: 0}
     combined:
       nll:
         - {name: l1, apply_after_step: 100_000}
@@ -34,8 +36,24 @@ loss:
       discriminator:
         loss: hinge
         apply_after_step: *disc_start
+      gsu:
+        geom_sem_contrast:
+          enabled: true
+          weight: 0.02
+          temperature: 0.1
+          sample_k: 2048
+          chunk_size: 1024
+          # apply_after_step: 50_000
+          apply_after_step: 0
+        unc_sem_couple:
+          enabled: true
+          weight: 0.005
+          # apply_after_step: 50_000
+          apply_after_step: 0
+
 
 wandb:
   name: re10k
   tags: [co3d, 256x256]
   # activated: true
+

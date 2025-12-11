@@ -6,19 +6,19 @@ defaults:
   - model/encoder: epipolar
   - model/decoder: splatting_cuda
   - optional model/discriminator: null
-  - experiment: speed3060 
-  - _self_
+  # - _self_
 
+seed: 111123  # 全局随机种子
 
 model:
   supersampling_factor: 1
   encode_latents: false
   encoder:
     epipolar:
-      num_samples: 196          
+      num_samples: 128         
     epipolar_transformer:       
       num_context_views: 2
-      num_samples: 484
+      num_samples: 256
       num_layers: 1
       num_heads: 4
       downscale: 4
@@ -32,6 +32,8 @@ model:
         d_token: 128
         d_dot: 128
         d_mlp: 256
+  autoencoder:
+    skip_connections: false
 
 freeze:
   autoencoder: false
@@ -55,7 +57,7 @@ hydra:
       file:
         class: logging.FileHandler
         formatter: simple
-        filename: ${hydra:run.dir}/test.log
+        filename: ${hydra:run.dir}/run.log
     root:
       level: INFO
       handlers: [console, file]
@@ -63,31 +65,34 @@ hydra:
 wandb:
   project: latentsplat
   entity: placeholder
-  name: gengqt
+  name: "latentsplat_200k_${now:%Y%m%d_%H%M%S}"
   mode: online
-  activated: true
+  activated: false
+  tags: ["a100", "200k_steps", "final_training"]
 
 mode: train
 
 dataset:
   overfit_to_scene: null
+  # image_shape: [128,128] 
+  image_shape: [256,256] 
 
 data_loader:
   train:
-    num_workers: 8           # A100建议8-12个workers
-    batch_size: 4            # 根据A100内存调整
+    num_workers: 16
+    # batch_size: 16  #双卡12, 单卡24拉满
+    batch_size: 2
     persistent_workers: true
-    prefetch_factor: 2       # 减少预取，避免内存占用过高
-    pin_memory: true         # 启用内存锁页，加速GPU传输
-    
+    prefetch_factor: 16
+    pin_memory: true
+    worker_init_fn: ${hydra:runtime.seed}
   test:
     num_workers: 4
-    batch_size: 2
+    batch_size: 1
     persistent_workers: false
     pin_memory: true
-    
   val:
-    num_workers: 4
+    num_workers: 1
     batch_size: 1
     persistent_workers: true
     pin_memory: true
@@ -104,9 +109,9 @@ optimizer:
     scheduler:
       name: CosineAnnealingLR
       kwargs:
-        T_max: 200000  # 余弦周期为200000步
-        eta_min: 1.0e-6  # 最小学习率
-    gradient_clip_val: 0.5
+        T_max: 200000
+        eta_min: 1.0e-6
+    gradient_clip_val: null
   discriminator:
     name: Adam
     lr: 9.0e-6 
@@ -117,71 +122,60 @@ optimizer:
 checkpointing:
   load: null
   resume: false
-  every_n_train_steps: 10000
-  save_top_k: 5
+  every_n_train_steps: 2500
+  save_top_k: -1
 
 train:
   depth_mode: null
-  extended_visualization: false
   step_offset: 0
+  extended_visualization: false
+  # extended_visualization: true
   video_interpolation: false
+  # video_interpolation: true
   video_wobble: false
+  # video_wobble: true
 
 test:
   output_path: outputs/test
-  num_rays: 256        # 经过20万步训练，可以测试更高分辨率
+  num_rays: 256
   num_points_per_ray: 256
-  decode_tile: 512     # A100内存更大
+  decode_tile: 512
   save_all_results: true
-
-seed: 111123
+  compute_metrics: true
 
 trainer:
-  strategy: ddp_find_unused_parameters_true  # 明确使用DDP策略
-  devices: auto                             # 自动检测GPU数量
-  precision: bf16-mixed                     # A100支持bf16，性能更好
   accelerator: gpu
-  sync_batchnorm: true   
-  devices: 2 
-  max_steps: 200001
-  val_check_interval: 5000
-  log_every_n_steps: 100
-  accumulate_grad_batches: 1
-  gradient_clip_val: null   
-  # device: cuda 
-  profiler: simple                          # 简单性能分析
-  detect_anomaly: true                      # 检测数值异常
-
-  logger:
-    _target_: pytorch_lightning.loggers.TensorBoardLogger
-    save_dir: outputs/tensorboard
-
-generate_gif: false
-gif_interval: 25000  
-
-
-# loss:
-#   gaussian:
-#     nll:
-#       - name: l1
-#         weight: 1.0
-#         apply_after_step: 0
-#         decay_after_step: 100000  # 10万步后开始衰减
-#         decay_rate: 0.5
-#   target:
-#     render:
-#       image:          # ← 必须显式声明 image
-#         nll:
-#           - name: l1
-#             weight: 1.0
-#             apply_after_step: 5000 
+  devices: 2
+  precision: bf16-mixed
+  max_steps: 200_001
+  val_check_interval: 250
+  log_every_n_steps: 2000
+  # strategy: ddp_find_unused_parameters_true
+  strategy: ddp   
+  accumulate_grad_batches: 3
+  gradient_clip_val: null
+  # profiler: simple
+  profiler: null
+  detect_anomaly: false
+  sync_batchnorm: true
 
 loss:
   gaussian:
     nll:
       - name: l1
-        weight: 
-          start: 1.0
-          end: 0.1
-          decay_type: cosine  # 使用余弦衰减更平滑
-        apply_after_step: 1000  # 稍晚开始应用
+        weight: 1.0
+        apply_after_step: 0
+  target:
+    render:
+      image:
+        nll:
+          - name: l1
+            weight: 1.0
+            apply_after_step: 0
+  gsu:
+    geom_sem_contrast:
+      weight: 0.2
+      temperature: 0.1
+    unc_sem_couple:
+      weight: 0.3
+

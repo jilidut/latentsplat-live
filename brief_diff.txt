@@ -1,0 +1,72 @@
+Only in modified/: acid_subset
+Files original/config/dataset/re10k.yaml and modified/config/dataset/re10k.yaml differ
+Only in modified/config/dataset: train
+Only in modified/config/experiment: speed3060.yaml
+Files original/config/main.yaml and modified/config/main.yaml differ
+Files original/config/model/encoder/epipolar.yaml and modified/config/model/encoder/epipolar.yaml differ
+Only in modified/: configs
+Only in modified/: demo_out
+Only in modified/: demo.png
+Only in modified/: extract_vae.py
+Only in modified/: former.test_num_points_per_ray=64hGUmodel.encoder.epipolar_transformer.test_num_points_per_ray=64uBEmodel.encoder.epipolar_transformer.test_num_points_per_ray=64nD[ks=3, index=41
+Only in modified/: from
+Files original/.git/config and modified/.git/config differ
+Files original/.git/index and modified/.git/index differ
+Files original/.git/logs/HEAD and modified/.git/logs/HEAD differ
+Files original/.git/logs/refs/heads/main and modified/.git/logs/refs/heads/main differ
+Files original/.git/logs/refs/remotes/origin/HEAD and modified/.git/logs/refs/remotes/origin/HEAD differ
+Only in original/.git/objects/pack: pack-3b08638a55172366c3e404bdb9f44c94079804bf.idx
+Only in original/.git/objects/pack: pack-3b08638a55172366c3e404bdb9f44c94079804bf.pack
+Only in original/.git/objects/pack: pack-3b08638a55172366c3e404bdb9f44c94079804bf.rev
+Only in modified/.git/objects/pack: pack-fd33a3719251d0aad6c1c51e05d694df20ee855b.idx
+Only in modified/.git/objects/pack: pack-fd33a3719251d0aad6c1c51e05d694df20ee855b.pack
+Only in modified/.git/objects/pack: pack-fd33a3719251d0aad6c1c51e05d694df20ee855b.rev
+Files original/.git/packed-refs and modified/.git/packed-refs differ
+Files original/.git/refs/heads/main and modified/.git/refs/heads/main differ
+Files original/.gitignore and modified/.gitignore differ
+Only in modified/: images
+Only in modified/: import
+Only in modified/: latent-gaussian-rasterization
+Only in modified/: mode=test
+Only in modified/: my_config_256.yaml
+Only in modified/: nohup.out
+Only in modified/: pid_test.txt
+Only in modified/: pid_train2x2.txt
+Only in modified/: pid_train3x3.txt
+Only in modified/: pid.txt
+Only in modified/: point_cloud_figure
+Only in modified/: quick_gif.py
+Only in modified/: re10k
+Only in modified/: re10k_subset
+Files original/README.md and modified/README.md differ
+Files original/requirements.txt and modified/requirements.txt differ
+Only in modified/src: callbacks
+Files original/src/dataset/data_module.py and modified/src/dataset/data_module.py differ
+Files original/src/dataset/dataset_re10k.py and modified/src/dataset/dataset_re10k.py differ
+Files original/src/dataset/shims/bounds_shim.py and modified/src/dataset/shims/bounds_shim.py differ
+Only in modified/src: generate_gif_now.py
+Files original/src/loss/__init__.py and modified/src/loss/__init__.py differ
+Files original/src/loss/loss_l1.py and modified/src/loss/loss_l1.py differ
+Files original/src/loss/loss.py and modified/src/loss/loss.py differ
+Only in modified/src: main copy.py
+Files original/src/main.py and modified/src/main.py differ
+Files original/src/misc/LocalLogger.py and modified/src/misc/LocalLogger.py differ
+Files original/src/model/autoencoder/autoencoder_kl.py and modified/src/model/autoencoder/autoencoder_kl.py differ
+Files original/src/model/decoder/cuda_splatting.py and modified/src/model/decoder/cuda_splatting.py differ
+Files original/src/model/decoder/decoder_splatting_cuda.py and modified/src/model/decoder/decoder_splatting_cuda.py differ
+Files original/src/model/encoder/encoder_epipolar.py and modified/src/model/encoder/encoder_epipolar.py differ
+Files original/src/model/encoder/epipolar/depth_predictor_monocular.py and modified/src/model/encoder/epipolar/depth_predictor_monocular.py differ
+Files original/src/model/encoder/epipolar/epipolar_sampler.py and modified/src/model/encoder/epipolar/epipolar_sampler.py differ
+Files original/src/model/encoder/epipolar/epipolar_transformer.py and modified/src/model/encoder/epipolar/epipolar_transformer.py differ
+Files original/src/model/encoder/epipolar/image_self_attention.py and modified/src/model/encoder/epipolar/image_self_attention.py differ
+Files original/src/model/encoder/visualization/encoder_visualizer_epipolar.py and modified/src/model/encoder/visualization/encoder_visualizer_epipolar.py differ
+Only in modified/src/model: model_wrapper copy.py
+Files original/src/model/model_wrapper.py and modified/src/model/model_wrapper.py differ
+Files original/src/model/types.py and modified/src/model/types.py differ
+Only in modified/: t_num_rays 降到 128 甚至 64 再试：
+Only in modified/: 
+Traceback (most recent call last):
+  File 
+Only in modified/: update.txt
+Only in modified/: venv310
+Only in modified/: .vscode

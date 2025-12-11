@@ -122,9 +122,7 @@ class DatasetCO3D(IterableDataset):
         sequence_to_frame_annotations = {}
         with self.use_co3d_data_types() as data_types:
             for i, c in enumerate(self.categories):
-                print(f"Loading CO3D category {c} [{i+1}/{len(self.categories)}].")
                 _path = f"{self.path}/{c}/frame_annotations.jgz"
-                print(f"loading from this {_path}")
                 category_frame_annotations = data_types.load_dataclass_jgzip(
                     _path,
                     List[data_types.FrameAnnotation],
@@ -144,7 +142,6 @@ class DatasetCO3D(IterableDataset):
                     try:
                         data_list = json.load(f)
                     except Exception as e:
-                        print(f"Invalid file {json_path}")
                         raise e
 
                 for seq_name, frame_num, _ in data_list:
@@ -164,7 +161,6 @@ class DatasetCO3D(IterableDataset):
         try:
             image = Image.open(image_path)
         except Exception as e:
-            print(f"Failed to load image {image_path}")
             raise e
         return image
 
@@ -299,12 +295,6 @@ class DatasetCO3D(IterableDataset):
                     [self._process_intrinsic(x) for x in target_examples], dim=0
                 )
 
-                # print(context_intrinsic.shape, target_intrinsic.shape)
-                # Skip the example if the field of view is too wide.
-                # if (get_fov(context_intrinsic).rad2deg() > self.cfg.max_fov).any():
-                #     continue
-
-                # Process images.
                 context_images = self._process_images(context_images)
                 target_images = self._process_images(target_images)
 

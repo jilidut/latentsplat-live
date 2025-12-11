@@ -1,13 +1,10 @@
-# src/model/encoder/epipolar/epipolar_transformer.py
 from dataclasses import dataclass
 from functools import partial
 from typing import Optional
 
-
-from einops import rearrange, repeat
+from einops import rearrange
 from jaxtyping import Float
 from torch import Tensor, nn
-import torch
 
 from ....geometry.epipolar_lines import get_depth
 from ....global_cfg import get_cfg
@@ -16,21 +13,18 @@ from ...transformer.transformer import Transformer
 from .conversions import depth_to_relative_disparity
 from .epipolar_sampler import EpipolarSampler, EpipolarSampling
 from .image_self_attention import ImageSelfAttention, ImageSelfAttentionCfg
-import math  
+
+
 @dataclass
 class EpipolarTransformerCfg:
     self_attention: ImageSelfAttentionCfg
     num_octaves: int
     num_layers: int
     num_heads: int
-    # num_samples: int
+    num_samples: int
     d_dot: int
     d_mlp: int
     downscale: int
-    num_samples: int = 484
-    num_context_views: int = 2  
-    test_num_rays: int = 512              
-    test_num_points_per_ray: int = 484 
 
 
 class EpipolarTransformer(nn.Module):
@@ -50,8 +44,7 @@ class EpipolarTransformer(nn.Module):
         super().__init__()
         self.cfg = cfg
         self.epipolar_sampler = EpipolarSampler(
-            # get_cfg().dataset.view_sampler.num_context_views,
-            cfg.num_context_views,   # 假设 cfg 里已经有这个字段
+            get_cfg().dataset.view_sampler.num_context_views,
             cfg.num_samples,
         )
         if self.cfg.num_octaves > 0:
@@ -73,8 +66,7 @@ class EpipolarTransformer(nn.Module):
 
         if cfg.downscale > 1:
             self.downscaler = nn.Conv2d(d_in, d_in, cfg.downscale, cfg.downscale)
-            # self.upscaler = nn.ConvTranspose2d(d_in, d_in, cfg.downscale, cfg.downscale)
-            self.upscaler = nn.ConvTranspose2d(d_in, d_in, 2, 2)
+            self.upscaler = nn.ConvTranspose2d(d_in, d_in, cfg.downscale, cfg.downscale)
             self.upscale_refinement = nn.Sequential(
                 nn.Conv2d(d_in, d_in * 2, 7, 1, 3),
                 nn.GELU(),
@@ -92,47 +84,22 @@ class EpipolarTransformer(nn.Module):
         intrinsics: Float[Tensor, "batch view 3 3"],
         near: Float[Tensor, "batch view"],
         far: Float[Tensor, "batch view"],
-    ) -> tuple[Float[Tensor, "batch view channel height width"], EpipolarSampling]:
-        b, v, c, h, w = features.shape
+    ) -> tuple[Float[Tensor, "batch view channel height width"], EpipolarSampling,]:
+        b, v, _, h, w = features.shape
 
-        # ===== 两行兼容代码：只处理广播，训练无副作用 =====
-        for t in (near, far):  # t 形状可能是 [B,V] 或 [B,1]
-            if t.dim() == 2 and t.shape[1] == 1:  # 真正缺失 view 维
-                t.data = t.expand(b, v)
-
-        # 1. 可选下采样
+        # If needed, apply downscaling.
         if self.downscaler is not None:
             features = rearrange(features, "b v c h w -> (b v) c h w")
             features = self.downscaler(features)
             features = rearrange(features, "(b v) c h w -> b v c h w", b=b, v=v)
 
-        # 2. 采样
-        sampling = self.epipolar_sampler(
+        # Get the samples used for epipolar attention.
+        sampling = self.epipolar_sampler.forward(
             features, extrinsics, intrinsics, near, far
         )
 
-        # 3. 早停：无有效样本
-        if sampling.features.shape[2] == 0:  # other_view 维
-            return features.new_zeros(b, v, c, h, w), sampling
-
-        # 4. 训练/测试分叉
-        if self.training:
-            q = sampling.features  # (B,V,OV,H,W,C)
-        else:
-            q = sampling.features[:, :, :, :self.cfg.test_num_rays]  # (B,V,OV,R,H,W,C)
-            # 1. 压维 → (B,V,OV,R,S,C)  S=H*W
-            if q.ndim == 7:
-                b_, v_, ov_, r_, h_, w_, c_ = q.shape
-                q = q.view(b_, v_, ov_, r_, h_*w_, c_)
-            else:  # 6 维
-                b_, v_, ov_, r_, s_, c_ = q.shape
-
-            # 2. 关键：测试时若 S=1，先 pad 到 2，防止后面 squeeze 掉
-            if q.size(-2) == 1 and not self.training:
-                q = torch.cat([q, q], dim=-2)
-
-        # 5. 可选深度编码
         if self.cfg.num_octaves > 0:
+            # Compute positionally encoded depths for the features.
             collect = self.epipolar_sampler.collect
             depths = get_depth(
                 rearrange(sampling.origins, "b v r xyz -> b v () r () xyz"),
@@ -141,44 +108,42 @@ class EpipolarTransformer(nn.Module):
                 rearrange(collect(extrinsics), "b v ov i j -> b v ov () () i j"),
                 rearrange(collect(intrinsics), "b v ov i j -> b v ov () () i j"),
             )
-            depths = depths.clip(
-                near[..., None, None, None],
-                far[..., None, None, None],
-            )
+
+            # Clip the depths. This is necessary for edge cases where the context views
+            # are extremely close together (or possibly oriented the same way).
+            depths = depths.maximum(near[..., None, None, None])
+            depths = depths.minimum(far[..., None, None, None])
             depths = depth_to_relative_disparity(
                 depths,
                 rearrange(near, "b v -> b v () () ()"),
                 rearrange(far, "b v -> b v () () ()"),
             )
-            q = q + self.depth_encoding(depths[..., None])
-
-        # 6. 构造 kv：整幅图展平
-        kv = rearrange(features, "b v c h w -> (b v h w) () c")  # (B*V*H*W, 1, C)
-
-        # 7. 统一 reshape q
-        q_flat = rearrange(q, "b v ov r s c -> (b v ov r) s c")  # (B*V*OV*R, S, C)
-
-        # 8. 过 Transformer
-        features = self.transformer(kv, q_flat, b=b, v=v, h=-1, w=-1)  # (T, S, C)
-
-        # 9. 摆回多维 – 训练/测试分叉
-        if self.training:
-            L = features.size(0) // (b * v)
-            h_patches = int(math.sqrt(L))
-            w_patches = L // h_patches
-            assert h_patches * w_patches == L, f"cannot factor {L} into 2 ints"
-            features = rearrange(
-                features, "(b v h w) () c -> b v c h w",
-                b=b, v=v, h=h_patches, w=w_patches
-            )
+            depths = self.depth_encoding(depths[..., None])
+            q = sampling.features + depths
         else:
-            # 9. 摆回 6 维 – 测试专用
-            features = rearrange(features, "(b v ov r) s c -> b v ov r s c",
-                                 b=b, v=v, ov=q.shape[2], r=q.shape[3])
-            features = rearrange(features, "b v ov r s c -> b v c (ov r) s")
+            q = sampling.features
 
-        # 10. 可选上采样（仅训练）
-        if self.upscaler is not None and self.training:
+        # Run the transformer.
+        kv = rearrange(features, "b v c h w -> (b v h w) () c")
+        features = self.transformer.forward(
+            kv,
+            rearrange(q, "b v () r s c -> (b v r) s c"),
+            b=b,
+            v=v,
+            h=h // self.cfg.downscale,
+            w=w // self.cfg.downscale,
+        )
+        features = rearrange(
+            features,
+            "(b v h w) () c -> b v c h w",
+            b=b,
+            v=v,
+            h=h // self.cfg.downscale,
+            w=w // self.cfg.downscale,
+        )
+
+        # If needed, apply upscaling.
+        if self.upscaler is not None:
             features = rearrange(features, "b v c h w -> (b v) c h w")
             features = self.upscaler(features)
             features = self.upscale_refinement(features) + features
@@ -196,15 +161,14 @@ class ConvFeedForward(nn.Module):
         dropout: float,
     ) -> None:
         super().__init__()
-        self.mlp = nn.Sequential(
-            nn.Linear(d_in, d_hidden),
+        self.layers = nn.Sequential(
+            nn.Conv2d(d_in, d_hidden, 7, 1, 3),
             nn.GELU(),
             nn.Dropout(dropout),
-            nn.Linear(d_hidden, d_in),
+            nn.Conv2d(d_hidden, d_in, 7, 1, 3),
             nn.Dropout(dropout),
         )
-        self.self_attention = nn.Identity()  
-        
+        self.self_attention = ImageSelfAttention(self_attention_cfg, d_in, d_in)
 
     def forward(
         self,
@@ -214,17 +178,6 @@ class ConvFeedForward(nn.Module):
         h: int,
         w: int,
     ) -> Float[Tensor, "batch token dim"]:
-        if not self.training and x.size(1) == 1:   
-            x = x.expand(-1, 2, -1)                
-        if self.training:
-            x = x.squeeze(1)                      
-            x = self.mlp(x) + x
-            return x.unsqueeze(1)                
-        else:
-            T, S, C = x.shape
-            x = x.reshape(-1, C)        
-            x = self.mlp(x) + x
-            x = x.reshape(T, S, C)        
-            return x 
-       
-        
+        x = rearrange(x, "(b v h w) () c -> (b v) c h w", b=b, v=v, h=h, w=w)
+        x = self.layers(self.self_attention(x) + x)
+        return rearrange(x, "(b v) c h w -> (b v h w) () c", b=b, v=v, h=h, w=w)

@@ -1,3 +1,4 @@
+# src/model/decoder/decoder.py
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Generic, Literal, TypeVar
@@ -22,6 +23,12 @@ class DecoderOutput:
     feature_posterior: DiagonalGaussianDistribution | None
     mask: Float[Tensor, "batch view height width"]
     depth: Float[Tensor, "batch view height width"]
+
+    # 新增：语义分支
+    semantic_latent: Float[Tensor, "batch view dim height width"] | None = None
+    gaussian_latent: Float[Tensor, "batch view dim height width"] | None = None
+    uncertainty: Float[Tensor, "batch view 1 height width"] | None = None
+    # 新增
 
 T = TypeVar("T")
 

@@ -1,3 +1,4 @@
+#src/loss/__init__.py
 from dataclasses import dataclass
 
 from .loss_group import LossGroup
@@ -9,7 +10,9 @@ from .loss_kl import LossKl, LossKlCfg
 from .loss_l1 import LossL1, LossL1Cfg
 from .loss_lpips import LossLpips, LossLpipsCfg
 from .loss_mse import LossMse, LossMseCfg
-
+#新增
+from .geom_sem_contrast import GeomSemContrastLoss, LossGeomSemContrastCfg
+from .unc_sem_couple import UncSemCoupleLoss, LossUncSemCoupleCfg
 
 LOSSES = {
     "depth": LossDepth,
@@ -17,11 +20,23 @@ LOSSES = {
     "l1": LossL1,
     "lpips": LossLpips,
     "mse": LossMse,
+    "geom_sem_contrast": GeomSemContrastLoss,  # 注册类
+    "unc_sem_couple": UncSemCoupleLoss,        # 注册类
+}
+
+# 新增映射表
+LOSS_CFG_MAP = {
+    "depth":   LossDepthCfg,
+    "kl":      LossKlCfg,
+    "l1":      LossL1Cfg,
+    "lpips":   LossLpipsCfg,
+    "mse":     LossMseCfg,
+    "geom_sem_contrast": LossGeomSemContrastCfg,
+    "unc_sem_couple":    LossUncSemCoupleCfg,
 }
 
 
-NLLLossCfg = LossDepthCfg | LossKlCfg | LossL1Cfg | LossLpipsCfg | LossMseCfg
-
+NLLLossCfg = LossDepthCfg | LossKlCfg | LossL1Cfg | LossLpipsCfg | LossMseCfg | LossGeomSemContrastCfg | LossUncSemCoupleCfg
 
 @dataclass
 class LossGroupCfg:
@@ -33,9 +48,6 @@ def get_loss_group(
     name: str, 
     group_cfg: LossGroupCfg | None = None
 ) -> LossGroup:
-    
-    print(f"[DEBUG] get_loss_group called: name={name}, group_cfg={group_cfg}")
-    
     if group_cfg is None:
         return LossGroup(name)
     nll_losses = []
