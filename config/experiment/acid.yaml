@@ -1,0 +1,43 @@
+# @package _global_
+
+defaults:
+  - override /dataset: acid
+  - override /model/autoencoder: kl_f8_skip
+  - override /model/encoder: epipolar
+  - override /model/discriminator: kl_f8
+
+model:
+  autoencoder:
+    skip_connections: true
+  encoder:
+    epipolar_transformer:
+      downscale: 4
+      self_attention:
+        patch_size: 4
+  supersampling_factor: 8
+  variational: gaussians
+
+loss:
+  target:
+    render:
+      image:
+        nll:
+          - {name: mse, weight: 10}
+          - {name: lpips, weight: 0.5, apply_after_step: 50_000}
+          - {name: geom_sem_contrast, enabled: true, weight: 0.02, temperature: 0.1, sample_k: 2048, chunk_size: 1024, apply_after_step: 10_000}
+          - {name: unc_sem_couple, enabled: true, weight: 0.005, apply_after_step: 5_000} 
+    combined:
+      nll:
+        - {name: l1, apply_after_step: 100_000}
+        - {name: lpips, apply_after_step: 100_000}
+      generator:
+        weight: 0.5
+        apply_after_step: &disc_start 125_000
+      discriminator:
+        loss: hinge
+        apply_after_step: *disc_start
+
+wandb:
+  name: re10k
+  tags: [co3d, 256x256]
+  # activated: true

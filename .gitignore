@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+venv310/
+venv310p/
+.vscode/
+.idea/
+*.log
+datasets/
+outputs/
+pretrained/
+original/
+re10k/
+acid_subset/
+*.zip

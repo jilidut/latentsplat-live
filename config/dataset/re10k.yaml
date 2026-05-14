@@ -1,0 +1,17 @@
+defaults:
+  - view_sampler: bounded
+
+name: re10k
+roots: ["/home/gengqt/latentsplat-live/latentsplat-v0.1-a100/re10k"]
+# skip_missing: false
+# strict: false
+# allow_empty: false
+make_baseline_1: true
+augment: true
+image_shape: [256,256]         
+background_color: [0.0, 0.0, 0.0]
+cameras_are_circular: false
+baseline_epsilon: 1.0e-3
+max_fov: 100.0
+
+

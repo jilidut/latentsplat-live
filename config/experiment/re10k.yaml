@@ -1,0 +1,69 @@
+# @package _global_
+#config/experiment/re10k.yaml
+defaults:
+  - override /dataset: re10k
+  - override /model/autoencoder: kl_f8_skip
+  - override /model/encoder: epipolar
+  - override /model/discriminator: kl_f8
+
+model:
+  autoencoder:
+    skip_connections: true
+  encoder:
+    use_gsu: true # 新增
+    epipolar_transformer:
+      downscale: 4
+      self_attention:
+        patch_size: 4
+  supersampling_factor: 8
+  variational: gaussians
+  decoder:               #新增
+    feature_out_ch: 4  
+    enable_residual: true #控制残差
+
+loss:
+  target:
+    render:
+      image:
+        nll:
+          - {name: mse, weight: 10}
+          - {name: lpips, weight: 0.5, apply_after_step: 50_000}
+          - {name: geom_sem_contrast, enabled: false, weight: 0.02, temperature: 0.1, sample_k: 2048, chunk_size: 1024, apply_after_step: 10_000}
+          - {name: unc_sem_couple, enabled: true, weight: 0.005, apply_after_step: 5_000} 
+    combined:
+      nll:
+        - {name: l1, apply_after_step: 100_000}
+        - {name: lpips, apply_after_step: 100_000}
+      generator:
+        weight: 0.5
+        apply_after_step: &disc_start 125_000
+      discriminator:
+        loss: hinge
+        apply_after_step: *disc_start
+
+# loss:
+#   target:
+#     render:
+#       image:
+#         nll:
+#           - {name: mse, weight: 10}
+#           - {name: lpips, weight: 0.5, apply_after_step: 0}
+#           - {name: geom_sem_contrast, enabled: false, weight: 0.02, temperature: 0.1, sample_k: 2048, chunk_size: 1024, apply_after_step: 0}
+#           - {name: unc_sem_couple, enabled: false, weight: 0.005, apply_after_step: 0} 
+#     combined:
+#       nll:
+#         - {name: l1, apply_after_step: 0}
+#         - {name: lpips, apply_after_step: 0}
+#       generator:
+#         weight: 0.5
+#         apply_after_step: &disc_start 0
+#       discriminator:
+#         loss: hinge
+#         apply_after_step: *disc_start
+     
+
+wandb:
+  name: re10k
+  tags: [co3d, 256x256]
+  # activated: true
+
